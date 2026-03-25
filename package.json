@@ -37,6 +37,11 @@
     "vite": "5.4.11"
   },
   "dependencies": {
+    "@bpmn-io/properties-panel": "^3.40.4",
+    "bpmn-js": "^18.13.2",
+    "bpmn-js-properties-panel": "^5.53.0",
+    "bpmn-moddle": "^10.0.0",
+    "camunda-bpmn-moddle": "^7.0.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-router-dom": "^7.11.0",

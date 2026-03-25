@@ -45,6 +45,20 @@ interface ElectronAPI {
     isDev: boolean
   }
 
+  // BPMN文件系统操作
+  bpmn: {
+    initDataDir: () => Promise<{ success: boolean; baseDir?: string }>
+    writeFile: (filePath: string, content: string) => Promise<{ success: boolean; error?: string }>
+    readFile: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>
+    deleteFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
+    listFiles: (dirPath: string) => Promise<{ success: boolean; files?: string[]; error?: string }>
+    exists: (filePath: string) => Promise<boolean>
+    exportData: (data: string, defaultName: string) => Promise<{ success: boolean; filePath?: string }>
+    importData: () => Promise<{ success: boolean; content?: string }>
+    openFile: () => Promise<{ success: boolean; content?: string; fileName?: string }>
+    saveFile: (content: string, defaultName: string) => Promise<{ success: boolean; filePath?: string }>
+  }
+
   // 事件监听
   on: (channel: string, callback: (...args: any[]) => void) => void
   off: (channel: string, callback: (...args: any[]) => void) => void
@@ -81,6 +95,20 @@ const electronAPI: ElectronAPI = {
     name: 'Cline Vite App',
     version: '1.0.0',
     isDev: process.env.NODE_ENV === 'development'
+  },
+
+  // BPMN文件系统操作
+  bpmn: {
+    initDataDir: () => ipcRenderer.invoke('bpmn:initDataDir'),
+    writeFile: (filePath: string, content: string) => ipcRenderer.invoke('bpmn:writeFile', filePath, content),
+    readFile: (filePath: string) => ipcRenderer.invoke('bpmn:readFile', filePath),
+    deleteFile: (filePath: string) => ipcRenderer.invoke('bpmn:deleteFile', filePath),
+    listFiles: (dirPath: string) => ipcRenderer.invoke('bpmn:listFiles', dirPath),
+    exists: (filePath: string) => ipcRenderer.invoke('bpmn:exists', filePath),
+    exportData: (data: string, defaultName: string) => ipcRenderer.invoke('bpmn:exportData', data, defaultName),
+    importData: () => ipcRenderer.invoke('bpmn:importData'),
+    openFile: () => ipcRenderer.invoke('bpmn:openFile'),
+    saveFile: (content: string, defaultName: string) => ipcRenderer.invoke('bpmn:saveFile', content, defaultName)
   },
 
   // 事件监听 (只允许安全的频道)

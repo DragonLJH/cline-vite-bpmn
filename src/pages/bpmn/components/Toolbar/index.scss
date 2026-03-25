@@ -1,0 +1,275 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+
+  &__group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background: white;
+    color: #374151;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+
+    &:hover:not(:disabled) {
+      background: #f3f4f6;
+      border-color: #9ca3af;
+      transform: translateY(-1px);
+    }
+
+    &:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    &--icon {
+      padding: 8px;
+      min-width: 36px;
+      justify-content: center;
+    }
+
+    &--small {
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+
+    &.active {
+      background: #3b82f6;
+      border-color: #3b82f6;
+      color: white;
+    }
+
+    &--save {
+      animation: fadeIn 0.3s ease;
+      
+      &.toolbar__btn--unsaved {
+        background: #fef3c7;
+        border-color: #f59e0b;
+        color: #92400e;
+        animation: pulse 2s infinite;
+        
+        &:hover {
+          background: #fde68a;
+          border-color: #d97706;
+        }
+      }
+      
+      &.toolbar__btn--saving {
+        background: #dbeafe;
+        border-color: #3b82f6;
+        color: #1e40af;
+        cursor: wait;
+      }
+    }
+  }
+
+  &__separator {
+    width: 1px;
+    height: 24px;
+    background: #d1d5db;
+    margin: 0 8px;
+  }
+
+  &__zoom {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    background: white;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+  }
+
+  &__zoom-level {
+    min-width: 40px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 500;
+    color: #6b7280;
+  }
+
+  // 下拉菜单
+  &__dropdown {
+    position: relative;
+    display: inline-block;
+
+    &:hover {
+      .toolbar__dropdown-menu {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+      }
+    }
+  }
+
+  &__dropdown-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    min-width: 150px;
+    background: white;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 100;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-10px);
+    transition: all 0.2s ease;
+    overflow: hidden;
+
+    button {
+      display: block;
+      width: 100%;
+      padding: 10px 14px;
+      border: none;
+      background: transparent;
+      text-align: left;
+      font-size: 13px;
+      color: #374151;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+
+      &:hover {
+        background: #f3f4f6;
+      }
+
+      &:not(:last-child) {
+        border-bottom: 1px solid #e5e7eb;
+      }
+    }
+  }
+}
+
+// 响应式设计
+@media (max-width: 768px) {
+  .toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+
+    &__group {
+      flex-wrap: wrap;
+    }
+
+    &__btn {
+      padding: 6px 10px;
+      font-size: 12px;
+
+      &--icon {
+        padding: 6px;
+        min-width: 32px;
+      }
+
+      &--small {
+        padding: 4px 8px;
+        font-size: 11px;
+      }
+    }
+
+    &__zoom {
+      padding: 2px 6px;
+    }
+
+    &__zoom-level {
+      min-width: 35px;
+      font-size: 11px;
+    }
+  }
+}
+
+// 深色模式支持
+@media (prefers-color-scheme: dark) {
+  .toolbar {
+    background: #1f2937;
+    border-bottom-color: #374151;
+
+    &__btn {
+      background: #374151;
+      border-color: #4b5563;
+      color: #d1d5db;
+
+      &:hover:not(:disabled) {
+        background: #4b5563;
+        border-color: #6b7280;
+      }
+
+      &.active {
+        background: #3b82f6;
+        border-color: #3b82f6;
+        color: white;
+      }
+    }
+
+    &__separator {
+      background: #4b5563;
+    }
+
+    &__zoom {
+      background: #374151;
+      border-color: #4b5563;
+    }
+
+    &__zoom-level {
+      color: #9ca3af;
+    }
+
+    &__dropdown-menu {
+      background: #374151;
+      border-color: #4b5563;
+
+      button {
+        color: #d1d5db;
+
+        &:hover {
+          background: #4b5563;
+        }
+
+      &:not(:last-child) {
+        border-bottom-color: #4b5563;
+      }
+    }
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+}

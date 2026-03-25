@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, Notification, clipboard } from 'electron'
 import * as path from 'path'
+import * as fs from 'fs'
 
 function createWindow() {
   // 获取 preload 脚本路径
@@ -109,6 +110,169 @@ ipcMain.on('clipboard:readText', (event) => {
 
 ipcMain.handle('clipboard:writeText', (event, text) => {
   clipboard.writeText(text)
+})
+
+// ========== BPMN 文件系统操作 ==========
+
+// BPMN数据目录
+const getBpmnDataDir = () => {
+  const userDataPath = app.getPath('userData')
+  return path.join(userDataPath, 'bpmn-data')
+}
+
+// 确保目录存在
+const ensureDir = (dirPath: string) => {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true })
+  }
+}
+
+// 初始化BPMN数据目录
+ipcMain.handle('bpmn:initDataDir', async () => {
+  const baseDir = getBpmnDataDir()
+  const dirs = [
+    path.join(baseDir, 'process-definitions', 'definitions'),
+    path.join(baseDir, 'process-instances', 'running'),
+    path.join(baseDir, 'process-instances', 'completed'),
+    path.join(baseDir, 'tasks', 'pending'),
+    path.join(baseDir, 'tasks', 'completed')
+  ]
+  dirs.forEach(ensureDir)
+  return { success: true, baseDir }
+})
+
+// 写入文件
+ipcMain.handle('bpmn:writeFile', async (event, filePath: string, content: string) => {
+  try {
+    const fullPath = path.join(getBpmnDataDir(), filePath)
+    const dir = path.dirname(fullPath)
+    ensureDir(dir)
+    fs.writeFileSync(fullPath, content, 'utf-8')
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+// 读取文件
+ipcMain.handle('bpmn:readFile', async (event, filePath: string) => {
+  try {
+    const fullPath = path.join(getBpmnDataDir(), filePath)
+    if (!fs.existsSync(fullPath)) {
+      return { success: false, error: '文件不存在' }
+    }
+    const content = fs.readFileSync(fullPath, 'utf-8')
+    return { success: true, content }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+// 删除文件
+ipcMain.handle('bpmn:deleteFile', async (event, filePath: string) => {
+  try {
+    const fullPath = path.join(getBpmnDataDir(), filePath)
+    if (fs.existsSync(fullPath)) {
+      fs.unlinkSync(fullPath)
+    }
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+// 列出目录文件
+ipcMain.handle('bpmn:listFiles', async (event, dirPath: string) => {
+  try {
+    const fullPath = path.join(getBpmnDataDir(), dirPath)
+    if (!fs.existsSync(fullPath)) {
+      return { success: true, files: [] }
+    }
+    const files = fs.readdirSync(fullPath)
+    return { success: true, files }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+// 检查文件是否存在
+ipcMain.handle('bpmn:exists', async (event, filePath: string) => {
+  const fullPath = path.join(getBpmnDataDir(), filePath)
+  return fs.existsSync(fullPath)
+})
+
+// 导出BPMN数据
+ipcMain.handle('bpmn:exportData', async (event, data: string, defaultName: string) => {
+  const result = await dialog.showSaveDialog(BrowserWindow.getFocusedWindow()!, {
+    title: '导出BPMN数据',
+    defaultPath: defaultName,
+    filters: [
+      { name: 'JSON文件', extensions: ['json'] },
+      { name: '所有文件', extensions: ['*'] }
+    ]
+  })
+  
+  if (!result.canceled && result.filePath) {
+    fs.writeFileSync(result.filePath, data, 'utf-8')
+    return { success: true, filePath: result.filePath }
+  }
+  return { success: false }
+})
+
+// 导入BPMN数据
+ipcMain.handle('bpmn:importData', async () => {
+  const result = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow()!, {
+    title: '导入BPMN数据',
+    filters: [
+      { name: 'JSON文件', extensions: ['json'] },
+      { name: '所有文件', extensions: ['*'] }
+    ],
+    properties: ['openFile']
+  })
+  
+  if (!result.canceled && result.filePaths.length > 0) {
+    const content = fs.readFileSync(result.filePaths[0], 'utf-8')
+    return { success: true, content }
+  }
+  return { success: false }
+})
+
+// 打开BPMN文件
+ipcMain.handle('bpmn:openFile', async () => {
+  const result = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow()!, {
+    title: '打开BPMN文件',
+    filters: [
+      { name: 'BPMN文件', extensions: ['bpmn', 'xml'] },
+      { name: '所有文件', extensions: ['*'] }
+    ],
+    properties: ['openFile']
+  })
+  
+  if (!result.canceled && result.filePaths.length > 0) {
+    const content = fs.readFileSync(result.filePaths[0], 'utf-8')
+    const fileName = path.basename(result.filePaths[0])
+    return { success: true, content, fileName }
+  }
+  return { success: false }
+})
+
+// 保存BPMN文件
+ipcMain.handle('bpmn:saveFile', async (event, content: string, defaultName: string) => {
+  const result = await dialog.showSaveDialog(BrowserWindow.getFocusedWindow()!, {
+    title: '保存BPMN文件',
+    defaultPath: defaultName,
+    filters: [
+      { name: 'BPMN文件', extensions: ['bpmn'] },
+      { name: 'XML文件', extensions: ['xml'] },
+      { name: '所有文件', extensions: ['*'] }
+    ]
+  })
+  
+  if (!result.canceled && result.filePath) {
+    fs.writeFileSync(result.filePath, content, 'utf-8')
+    return { success: true, filePath: result.filePath }
+  }
+  return { success: false }
 })
 
 app.whenReady().then(createWindow)

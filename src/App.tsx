@@ -2,7 +2,7 @@ import React, { Suspense } from 'react'
 import { HashRouter as Router, Routes, Route } from 'react-router-dom'
 import AppTop from './components/AppTop'
 import { generateRoutes, RouteConfig } from './router'
-import './App.css'
+import './App.scss'
 
 // 加载组件
 const LoadingSpinner = () => (
@@ -55,7 +55,7 @@ function App() {
       <div className="app" style={{
         height: '100vh',
         display: 'flex',
-        flexDirection: 'column',
+        flexDirection: 'row',
         margin: 0,
         padding: 0,
         overflow: 'hidden'

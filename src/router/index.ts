@@ -26,6 +26,10 @@ export interface RouteConfig {
 }
 
 // 使用 Vite 的 import.meta.glob 自动发现页面
+// 元数据 - 立即加载（eager）
+const pageMetaModules = import.meta.glob('../pages/*/index.tsx', { eager: true }) as Record<string, PageModule>
+
+// 组件 - 懒加载
 const pageModules = import.meta.glob('../pages/*/index.tsx') as Record<string, () => Promise<PageModule>>
 
 // 生成路由配置（同步版本，返回懒加载组件）
@@ -37,7 +41,7 @@ export const generateRoutes = (): RouteConfig[] => {
     // ../pages/home/index.tsx -> home -> /home
     // ../pages/counter/index.tsx -> counter -> /counter
     const routePath = path.replace('../pages/', '').replace('/index.tsx', '')
-    const finalPath = routePath === 'home' ? '/' : `/${routePath}`
+    const finalPath = routePath === 'bpmn' ? '/' : `/${routePath}`
 
     // 创建懒加载组件
     const LazyComponent = React.lazy(async () => {
@@ -63,11 +67,15 @@ export const generateRoutes = (): RouteConfig[] => {
       }
     })
 
+    // 从已加载的元数据模块中获取元数据
+    const metaModule = pageMetaModules[path]
+    const meta = metaModule?.pageMeta
+
     routes.push({
       path: finalPath,
       component: LazyComponent,
       loader: moduleLoader,
-      meta: undefined // 懒加载时无法同步获取元数据
+      meta: meta
     })
   }
 

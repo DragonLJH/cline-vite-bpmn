@@ -3,6 +3,7 @@ import BpmnDesigner from './components/BpmnDesigner'
 import ProcessList from './components/ProcessList'
 import PropertiesPanel from './components/PropertiesPanel'
 import Toolbar from './components/Toolbar'
+import Icon from '../../components/Icon'
 import { useBpmnStore } from '../../stores/bpmnStore'
 import { bpmnService } from '../../services/bpmn'
 import type { ProcessDefinition } from '../../types/bpmn'
@@ -58,7 +59,7 @@ const BpmnPage: React.FC = () => {
     if (!currentProcessId) return
 
     setSaveStatus('saving')
-    
+
     try {
       const currentProcess = processList.find(p => p.id === currentProcessId)
       if (currentProcess) {
@@ -119,14 +120,14 @@ const BpmnPage: React.FC = () => {
       const shouldSave = window.confirm(
         `当前流程「${processList.find(p => p.id === currentProcessId)?.name || '未命名'}」有未保存的修改。\n\n点击"确定"保存并切换\n点击"取消"放弃修改并切换`
       )
-      
+
       if (shouldSave) {
         handleSave()
       }
-      
+
       setPendingProcess(null)
     }
-    
+
     setCurrentProcessId(process.id)
     setBpmnXml(process.bpmnXml)
     clearHistory()
@@ -178,19 +179,6 @@ const BpmnPage: React.FC = () => {
     }
   }
 
-  // 获取保存状态图标
-  const getSaveStatusIcon = () => {
-    switch (saveStatus) {
-      case 'saved':
-        return '✅'
-      case 'unsaved':
-        return '⚠️'
-      case 'saving':
-        return '⏳'
-      default:
-        return ''
-    }
-  }
 
   return (
     <div className="bpmn-page">
@@ -203,36 +191,30 @@ const BpmnPage: React.FC = () => {
         saveStatus={saveStatus}
       />
 
+      {/* 流程列表横向区域 */}
+      <div className="bpmn-page__process-bar">
+        <div className="bpmn-page__process-bar-header">
+          <div className="bpmn-page__process-bar-title">
+            <Icon name="list" size={16} />
+            <span>流程列表</span>
+          </div>
+          <button
+            className="bpmn-page__process-bar-toggle"
+            onClick={() => setShowProcessList(!showProcessList)}
+            title={showProcessList ? '收起' : '展开'}
+          >
+            <Icon name={showProcessList ? 'chevron-up' : 'chevron-down'} size={14} />
+          </button>
+        </div>
+        {showProcessList && (
+          <ProcessList
+            onSelectProcess={handleSelectProcess}
+            layout="horizontal"
+          />
+        )}
+      </div>
 
       <div className="bpmn-page__content">
-        {/* 流程列表侧边栏 */}
-        {showProcessList && (
-          <div className="bpmn-page__sidebar bpmn-page__sidebar--left">
-            <div className="bpmn-page__sidebar-header">
-              <h3>流程列表</h3>
-              <button
-                className="bpmn-page__sidebar-toggle"
-                onClick={() => setShowProcessList(false)}
-                title="收起侧边栏"
-              >
-                ◀
-              </button>
-            </div>
-            <ProcessList onSelectProcess={handleSelectProcess} />
-          </div>
-        )}
-
-        {/* 流程列表收起时的展开按钮 */}
-        {!showProcessList && (
-          <button
-            className="bpmn-page__expand-btn bpmn-page__expand-btn--left"
-            onClick={() => setShowProcessList(true)}
-            title="展开流程列表"
-          >
-            📋
-          </button>
-        )}
-
         {/* BPMN设计器主体 */}
         <div className="bpmn-page__main">
           <BpmnDesigner ref={designerRef} />
@@ -246,9 +228,9 @@ const BpmnPage: React.FC = () => {
               <button
                 className="bpmn-page__sidebar-toggle"
                 onClick={() => setShowPropertiesPanel(false)}
-                title="收起侧边栏"
+                title="收起属性面板"
               >
-                ▶
+                <Icon name="chevron-right" size={14} />
               </button>
             </div>
             <PropertiesPanel />
@@ -262,7 +244,7 @@ const BpmnPage: React.FC = () => {
             onClick={() => setShowPropertiesPanel(true)}
             title="展开属性面板"
           >
-            ⚙️
+            <Icon name="settings" size={18} />
           </button>
         )}
       </div>
@@ -278,7 +260,10 @@ const BpmnPage: React.FC = () => {
         </div>
         <div className="bpmn-page__statusbar-right">
           <span className={`bpmn-page__save-status bpmn-page__save-status--${saveStatus}`}>
-            {getSaveStatusIcon()} {getSaveStatusText()}
+            {saveStatus === 'saved' && <Icon name="check" size={14} color="#166534" />}
+            {saveStatus === 'unsaved' && <Icon name="warning" size={14} color="#92400e" />}
+            {saveStatus === 'saving' && <Icon name="clock" size={14} color="#1e40af" />}
+            {' '}{getSaveStatusText()}
           </span>
           <span className="bpmn-page__version">
             BPMN 2.0

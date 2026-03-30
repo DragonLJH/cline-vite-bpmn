@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import Icon from '../../../../components/Icon'
 import { useBpmnStore } from '../../../../stores/bpmnStore'
 import { bpmnService } from '../../../../services/bpmn'
 import type { ProcessDefinition } from '../../../../types/bpmn'
@@ -7,9 +8,10 @@ import './index.scss'
 interface ProcessListProps {
   className?: string
   onSelectProcess?: (process: ProcessDefinition) => void
+  layout?: 'vertical' | 'horizontal'
 }
 
-const ProcessList: React.FC<ProcessListProps> = ({ className, onSelectProcess }) => {
+const ProcessList: React.FC<ProcessListProps> = ({ className, onSelectProcess, layout = 'vertical' }) => {
   const {
     processList,
     currentProcessId,
@@ -113,7 +115,7 @@ const ProcessList: React.FC<ProcessListProps> = ({ className, onSelectProcess })
   }
 
   return (
-    <div className={`process-list ${className || ''}`}>
+    <div className={`process-list process-list--${layout} ${className || ''}`}>
       {/* 头部 */}
       <div className="process-list__header">
         <h3 className="process-list__title">流程列表</h3>
@@ -122,7 +124,7 @@ const ProcessList: React.FC<ProcessListProps> = ({ className, onSelectProcess })
           onClick={() => setShowCreateModal(true)}
           title="创建新流程"
         >
-          <span className="process-list__create-icon">+</span>
+          <Icon name="plus" size={18} color="white" />
         </button>
       </div>
 
@@ -140,7 +142,7 @@ const ProcessList: React.FC<ProcessListProps> = ({ className, onSelectProcess })
             className="process-list__search-clear"
             onClick={() => setSearchTerm('')}
           >
-            ×
+            <Icon name="close" size={14} />
           </button>
         )}
       </div>
@@ -151,12 +153,12 @@ const ProcessList: React.FC<ProcessListProps> = ({ className, onSelectProcess })
           <div className="process-list__empty">
             {searchTerm ? (
               <>
-                <span className="process-list__empty-icon">🔍</span>
+                <Icon name="search" size={48} className="process-list__empty-icon" />
                 <span className="process-list__empty-text">未找到匹配的流程</span>
               </>
             ) : (
               <>
-                <span className="process-list__empty-icon">📋</span>
+                <Icon name="document" size={48} className="process-list__empty-icon" />
                 <span className="process-list__empty-text">暂无流程</span>
                 <button
                   className="process-list__empty-btn"
@@ -193,7 +195,7 @@ const ProcessList: React.FC<ProcessListProps> = ({ className, onSelectProcess })
                   onClick={(e) => handleDuplicateProcess(process, e)}
                   title="复制流程"
                 >
-                  📄
+                  <Icon name="copy" size={14} />
                 </button>
                 <button
                   className="process-list__action-btn process-list__action-btn--delete"
@@ -203,7 +205,7 @@ const ProcessList: React.FC<ProcessListProps> = ({ className, onSelectProcess })
                   }}
                   title="删除流程"
                 >
-                  🗑️
+                  <Icon name="delete" size={14} />
                 </button>
               </div>
             </div>

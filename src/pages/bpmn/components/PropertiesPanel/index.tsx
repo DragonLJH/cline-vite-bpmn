@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useBpmnStore } from '../../../../stores/bpmnStore'
 import { bpmnService } from '../../../../services/bpmn'
 import type { BpmnElement, TaskConfig, EventConfig, GatewayCondition } from '../../../../types/bpmn'
@@ -26,56 +26,93 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
   
   // 跟踪是否有未保存的修改
   const [hasChanges, setHasChanges] = useState(false)
+  
+  // 确认对话框相关状态
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+  const [pendingElement, setPendingElement] = useState<BpmnElement | null>(null)
+  
+  // 使用 ref 追踪上一个选中的元素
+  const prevSelectedElementRef = useRef<BpmnElement | null>(null)
+
+  // 加载元素数据到表单
+  const loadElementData = (element: BpmnElement) => {
+    setElementName(element.name || '')
+    setElementId(element.id)
+    
+    // 根据元素类型初始化配置
+    const bo = element.businessObject
+    
+    if (bpmnService.isTaskType(element.type)) {
+      setTaskConfig({
+        assignee: bo?.assignee || '',
+        candidateUsers: bo?.candidateUsers || [],
+        candidateGroups: bo?.candidateGroups || [],
+        dueDate: bo?.dueDate || '',
+        priority: bo?.priority || 50,
+        formKey: bo?.formKey || ''
+      })
+    } else {
+      setTaskConfig({})
+    }
+    
+    if (bpmnService.isEventType(element.type)) {
+      setEventConfig({
+        timerType: bo?.eventDefinitions?.[0]?.$type?.includes('Timer') ? 'timeDuration' : undefined,
+        timerValue: bo?.eventDefinitions?.[0]?.timeDuration?.body || '',
+        messageRef: bo?.eventDefinitions?.[0]?.messageRef?.name || '',
+        signalRef: bo?.eventDefinitions?.[0]?.signalRef?.name || ''
+      })
+    } else {
+      setEventConfig({})
+    }
+    
+    if (bpmnService.isGatewayType(element.type)) {
+      setGatewayCondition({
+        conditionExpression: bo?.conditionExpression?.body || '',
+        defaultFlow: bo?.default?.id === element.id
+      })
+    } else {
+      setGatewayCondition({})
+    }
+    
+    setDocumentation(bo?.documentation?.[0]?.text || '')
+    setHasChanges(false)
+  }
+
+  // 重置表单
+  const resetForm = () => {
+    setElementName('')
+    setElementId('')
+    setDocumentation('')
+    setTaskConfig({})
+    setEventConfig({})
+    setGatewayCondition({})
+    setHasChanges(false)
+  }
 
   // 监听选中元素变化
   useEffect(() => {
     if (selectedElement) {
-      setElementName(selectedElement.name || '')
-      setElementId(selectedElement.id)
+      // 检查是否是元素切换（而非初始化）
+      const prevElement = prevSelectedElementRef.current
+      const isElementSwitch = prevElement && prevElement.id !== selectedElement.id
       
-      // 根据元素类型初始化配置
-      const bo = selectedElement.businessObject
-      
-      if (bpmnService.isTaskType(selectedElement.type)) {
-        setTaskConfig({
-          assignee: bo?.assignee || '',
-          candidateUsers: bo?.candidateUsers || [],
-          candidateGroups: bo?.candidateGroups || [],
-          dueDate: bo?.dueDate || '',
-          priority: bo?.priority || 50,
-          formKey: bo?.formKey || ''
-        })
+      // 如果有未保存修改且是元素切换，显示确认弹窗
+      if (hasChanges && isElementSwitch) {
+        setPendingElement(selectedElement)
+        setShowConfirmDialog(true)
+        return
       }
       
-      if (bpmnService.isEventType(selectedElement.type)) {
-        setEventConfig({
-          timerType: bo?.eventDefinitions?.[0]?.$type?.includes('Timer') ? 'timeDuration' : undefined,
-          timerValue: bo?.eventDefinitions?.[0]?.timeDuration?.body || '',
-          messageRef: bo?.eventDefinitions?.[0]?.messageRef?.name || '',
-          signalRef: bo?.eventDefinitions?.[0]?.signalRef?.name || ''
-        })
-      }
-      
-      if (bpmnService.isGatewayType(selectedElement.type)) {
-        setGatewayCondition({
-          conditionExpression: bo?.conditionExpression?.body || '',
-          defaultFlow: bo?.default?.id === selectedElement.id
-        })
-      }
-      
-      setDocumentation(bo?.documentation?.[0]?.text || '')
-      setHasChanges(false)
+      // 无修改或初始化，正常加载元素数据
+      loadElementData(selectedElement)
+      prevSelectedElementRef.current = selectedElement
     } else {
       // 重置表单
-      setElementName('')
-      setElementId('')
-      setDocumentation('')
-      setTaskConfig({})
-      setEventConfig({})
-      setGatewayCondition({})
-      setHasChanges(false)
+      resetForm()
+      prevSelectedElementRef.current = null
     }
-  }, [selectedElement])
+  }, [selectedElement]) // 只监听 selectedElement 变化
 
   // 更新本地状态（不应用到画布）
   const handleNameChange = (newName: string) => {
@@ -108,17 +145,15 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
     setHasChanges(true)
   }
 
-  // 保存所有修改到画布
-  const handleSave = () => {
-    if (!selectedElement) return
-
+  // 保存指定元素的修改到画布
+  const handleSaveElement = (elementToSave: BpmnElement) => {
     const modeler = useBpmnStore.getState().modelerRef
     if (!modeler) return
 
     try {
       const elementRegistry = modeler.get('elementRegistry')
       const modeling = modeler.get('modeling')
-      const element = elementRegistry.get(selectedElement.id)
+      const element = elementRegistry.get(elementToSave.id)
       
       if (!element) return
 
@@ -126,24 +161,24 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
       const properties: any = {}
 
       // 更新名称
-      if (elementName !== (selectedElement.name || '')) {
+      if (elementName !== (elementToSave.name || '')) {
         properties.name = elementName
       }
 
       // 更新ID（需要特殊处理）
-      if (elementId !== selectedElement.id) {
+      if (elementId !== elementToSave.id) {
         properties.id = elementId
       }
 
       // 更新文档
-      const currentDoc = selectedElement.businessObject?.documentation?.[0]?.text || ''
+      const currentDoc = elementToSave.businessObject?.documentation?.[0]?.text || ''
       if (documentation !== currentDoc) {
         properties.documentation = documentation ? [{ text: documentation }] : []
       }
 
       // 更新任务配置
-      if (bpmnService.isTaskType(selectedElement.type)) {
-        const bo = selectedElement.businessObject
+      if (bpmnService.isTaskType(elementToSave.type)) {
+        const bo = elementToSave.businessObject
         if (taskConfig.assignee !== (bo?.assignee || '')) {
           properties.assignee = taskConfig.assignee
         }
@@ -163,12 +198,25 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
         modeling.updateProperties(element, properties)
         setHasUnsavedChanges(true)
         console.log('属性已保存到节点:', properties)
+        
+        // 保存后更新 selectedElement 状态，使其显示最新的属性值
+        const updatedElement = elementRegistry.get(elementToSave.id)
+        if (updatedElement) {
+          const { setSelectedElement } = useBpmnStore.getState()
+          setSelectedElement(updatedElement)
+        }
       }
 
       setHasChanges(false)
     } catch (error) {
       console.error('保存属性失败:', error)
     }
+  }
+
+  // 保存所有修改到画布（用于手动保存按钮）
+  const handleSave = () => {
+    if (!selectedElement) return
+    handleSaveElement(selectedElement)
   }
 
   // 放弃修改
@@ -192,6 +240,51 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
       }
     }
     setHasChanges(false)
+  }
+
+  // 确认对话框处理函数
+  const handleConfirmSave = () => {
+    // 保存之前的元素（元素 A）的修改
+    if (prevSelectedElementRef.current) {
+      handleSaveElement(prevSelectedElementRef.current)
+    }
+    
+    // 切换到待处理的元素（元素 B）
+    if (pendingElement) {
+      loadElementData(pendingElement)
+      prevSelectedElementRef.current = pendingElement
+    }
+    
+    // 关闭弹窗
+    setShowConfirmDialog(false)
+    setPendingElement(null)
+  }
+
+  const handleConfirmDiscard = () => {
+    // 放弃当前修改
+    setHasChanges(false)
+    
+    // 切换到待处理的元素
+    if (pendingElement) {
+      loadElementData(pendingElement)
+      prevSelectedElementRef.current = pendingElement
+    }
+    
+    // 关闭弹窗
+    setShowConfirmDialog(false)
+    setPendingElement(null)
+  }
+
+  const handleConfirmCancel = () => {
+    // 取消切换，恢复之前选中的元素
+    const { setSelectedElement } = useBpmnStore.getState()
+    if (prevSelectedElementRef.current) {
+      setSelectedElement(prevSelectedElementRef.current)
+    }
+    
+    // 关闭弹窗
+    setShowConfirmDialog(false)
+    setPendingElement(null)
   }
 
   // 渲染基本属性
@@ -477,6 +570,47 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
             >
               💾 保存到节点
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 确认对话框 */}
+      {showConfirmDialog && (
+        <div className="properties-panel__modal-overlay" onClick={handleConfirmCancel}>
+          <div className="properties-panel__modal" onClick={(e) => e.stopPropagation()}>
+            <div className="properties-panel__modal-header">
+              <h4 className="properties-panel__modal-title">未保存的修改</h4>
+            </div>
+
+            <div className="properties-panel__modal-body">
+              <p className="properties-panel__confirm-text">
+                当前元素有未保存的修改，是否保存？
+              </p>
+              <p className="properties-panel__confirm-warning">
+                切换元素将丢失未保存的修改。
+              </p>
+            </div>
+
+            <div className="properties-panel__modal-footer">
+              <button
+                className="properties-panel__modal-btn properties-panel__modal-btn--cancel"
+                onClick={handleConfirmCancel}
+              >
+                取消
+              </button>
+              <button
+                className="properties-panel__modal-btn properties-panel__modal-btn--discard"
+                onClick={handleConfirmDiscard}
+              >
+                放弃修改
+              </button>
+              <button
+                className="properties-panel__modal-btn properties-panel__modal-btn--save"
+                onClick={handleConfirmSave}
+              >
+                保存并切换
+              </button>
+            </div>
           </div>
         </div>
       )}

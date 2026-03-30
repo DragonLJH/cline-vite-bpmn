@@ -3,6 +3,92 @@
   flex-direction: column;
   height: 100%;
   background: white;
+
+  // 水平布局样式
+  &--horizontal {
+    flex-direction: row;
+    height: auto;
+    border-right: none;
+
+    .process-list__header {
+      width: auto;
+      min-width: 120px;
+      flex-direction: column;
+      padding: 8px 12px;
+      border-bottom: none;
+      border-right: 1px solid #e5e7eb;
+    }
+
+    .process-list__title {
+      font-size: 13px;
+      writing-mode: horizontal-tb;
+    }
+
+    .process-list__search {
+      display: none; // 水平布局隐藏搜索框
+    }
+
+    .process-list__items {
+      display: flex;
+      flex-direction: row;
+      gap: 8px;
+      padding: 8px 16px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      flex: 1;
+    }
+
+    .process-list__item {
+      flex-direction: column;
+      min-width: 180px;
+      max-width: 200px;
+      padding: 10px 12px;
+      border-left: none;
+      border-bottom: 2px solid transparent;
+      border-radius: 8px;
+      background: #f9fafb;
+
+      &:hover {
+        background: #f3f4f6;
+      }
+
+      &.active {
+        background: #eff6ff;
+        border-bottom-color: #3b82f6;
+      }
+    }
+
+    .process-list__item-main {
+      width: 100%;
+    }
+
+    .process-list__item-desc {
+      display: none; // 水平布局隐藏描述
+    }
+
+    .process-list__item-actions {
+      opacity: 1;
+      margin-top: 6px;
+      justify-content: center;
+    }
+
+    .process-list__footer {
+      display: none; // 水平布局隐藏底部统计
+    }
+
+    .process-list__empty {
+      flex-direction: row;
+      padding: 20px;
+    }
+
+    .process-list__empty-icon {
+      font-size: 24px;
+      margin-bottom: 0;
+      margin-right: 12px;
+    }
+  }
+
+  // 默认垂直布局样式
   border-right: 1px solid #e5e7eb;
 
   &__header {

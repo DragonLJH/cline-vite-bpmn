@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react'
 import BpmnModeler from 'bpmn-js/lib/Modeler'
 import type { BpmnElement } from '../../../../types/bpmn'
 import { useBpmnStore } from '../../../../stores/bpmnStore'
+import { useXmlSync, XmlDiffAnalyzer } from '../../../../utils/bpmnXmlSync'
 import './index.scss'
 
 // 导入bpmn-js样式
@@ -14,6 +15,11 @@ interface BpmnDesignerRef {
   getSvg: () => Promise<string | null>
   importXml: (xml: string) => Promise<void>
   saveCurrentXml: () => Promise<void>
+  syncXml: (newXml: string, options?: { 
+    preserveViewState?: boolean
+    useSmartSync?: boolean 
+  }) => Promise<void>
+  getPerformanceMetrics: () => any
 }
 
 interface BpmnDesignerProps {
@@ -34,6 +40,9 @@ const BpmnDesigner = React.forwardRef<BpmnDesignerRef, BpmnDesignerProps>(({ cla
     minimapOpen,
     setModelerRef
   } = useBpmnStore()
+
+  // XML 同步管理器
+  const xmlSyncManager = useXmlSync(modelerRef.current)
 
   // 初始化BPMN Modeler
   useEffect(() => {
@@ -71,9 +80,23 @@ const BpmnDesigner = React.forwardRef<BpmnDesignerRef, BpmnDesignerProps>(({ cla
     })
 
     // 监听元素变化事件
-    modeler.on('element.changed', () => {
+    modeler.on('element.changed', (event: any) => {
+      const { element } = event
+      
       // 保存当前XML到撤销栈
       saveCurrentXml()
+      
+      // 如果当前选中的元素被修改了，刷新 selectedElement
+      const { selectedElement } = useBpmnStore.getState()
+      if (selectedElement && selectedElement.id === element.id) {
+        const updatedElement: BpmnElement = {
+          id: element.id,
+          type: element.type as any,
+          name: element.businessObject?.name,
+          businessObject: element.businessObject
+        }
+        setSelectedElement(updatedElement)
+      }
     })
 
     // 监听命令栈变化（用于撤销/重做）
@@ -123,12 +146,58 @@ const BpmnDesigner = React.forwardRef<BpmnDesignerRef, BpmnDesignerProps>(({ cla
     }
   }, [bpmnXml, setBpmnXml, pushToUndoStack])
 
-  // 监听外部XML变化
-  useEffect(() => {
-    if (isModelerReady && modelerRef.current) {
-      importXml(bpmnXml)
+  // 智能 XML 同步（避免不必要的重载）
+  const syncXml = useCallback(async (
+    newXml: string, 
+    options: { 
+      preserveViewState?: boolean
+      useSmartSync?: boolean 
+    } = {}
+  ) => {
+    if (!modelerRef.current || !xmlSyncManager) return
+
+    const { preserveViewState = true, useSmartSync = true } = options
+
+    try {
+      // 获取当前XML用于比较
+      const { xml: currentXml } = await modelerRef.current.saveXML({ format: true })
+      
+      // 检查是否有实质变化
+      if (currentXml && !XmlDiffAnalyzer.hasSignificantChanges(currentXml, newXml)) {
+        console.log('XML无实质变化，跳过同步')
+        return
+      }
+
+      if (useSmartSync && currentXml) {
+        // 使用智能同步
+        await xmlSyncManager.smartSync(newXml, currentXml)
+      } else {
+        // 使用全量重载
+        await xmlSyncManager.syncWithFullReload(newXml, { preserveViewState })
+      }
+    } catch (error) {
+      console.error('XML同步失败:', error)
+      // 回退到标准导入
+      await importXml(newXml)
     }
-  }, [bpmnXml, isModelerReady, importXml])
+  }, [xmlSyncManager, importXml])
+
+  // 监听外部XML变化（使用智能同步）
+  useEffect(() => {
+    if (isModelerReady && modelerRef.current && xmlSyncManager) {
+      // 避免初始加载时的重复导入
+      modelerRef.current.saveXML({ format: true })
+        .then(({ xml: currentXml }) => {
+          if (currentXml && XmlDiffAnalyzer.hasSignificantChanges(currentXml, bpmnXml)) {
+            syncXml(bpmnXml, { preserveViewState: true, useSmartSync: true })
+          }
+        })
+        .catch(() => {
+          // 如果获取当前XML失败，直接导入
+          importXml(bpmnXml)
+        })
+    }
+  }, [bpmnXml, isModelerReady, xmlSyncManager, syncXml, importXml])
 
   // 监听缩放变化
   useEffect(() => {
@@ -157,6 +226,11 @@ const BpmnDesigner = React.forwardRef<BpmnDesignerRef, BpmnDesignerProps>(({ cla
     }
   }, [])
 
+  // 获取性能指标
+  const getPerformanceMetrics = useCallback(() => {
+    return xmlSyncManager?.getPerformanceMetrics() || null
+  }, [xmlSyncManager])
+
   // 暴露方法给父组件
   React.useImperativeHandle(
     ref,
@@ -164,9 +238,11 @@ const BpmnDesigner = React.forwardRef<BpmnDesignerRef, BpmnDesignerProps>(({ cla
       getCanvas,
       getSvg,
       importXml,
-      saveCurrentXml
+      saveCurrentXml,
+      syncXml,
+      getPerformanceMetrics
     }),
-    [getCanvas, getSvg, importXml, saveCurrentXml]
+    [getCanvas, getSvg, importXml, saveCurrentXml, syncXml, getPerformanceMetrics]
   )
 
   return (

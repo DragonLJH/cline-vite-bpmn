@@ -4,6 +4,14 @@ import { bpmnService } from '../../../../services/bpmn'
 import type { BpmnElement, TaskConfig, EventConfig, GatewayCondition } from '../../../../types/bpmn'
 import './index.scss'
 
+// Process属性接口
+interface ProcessConfig {
+  id: string
+  name: string
+  isExecutable: boolean
+  documentation: string
+}
+
 interface PropertiesPanelProps {
   className?: string
 }
@@ -23,6 +31,14 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
   
   // 网关相关属性
   const [gatewayCondition, setGatewayCondition] = useState<GatewayCondition>({})
+  
+  // Process属性
+  const [processConfig, setProcessConfig] = useState<ProcessConfig>({
+    id: '',
+    name: '',
+    isExecutable: false,
+    documentation: ''
+  })
   
   // 跟踪是否有未保存的修改
   const [hasChanges, setHasChanges] = useState(false)
@@ -79,6 +95,45 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
     setHasChanges(false)
   }
 
+  // 获取Process元素
+  const getProcessElement = () => {
+    const modeler = useBpmnStore.getState().modelerRef
+    if (!modeler) return null
+    
+    try {
+      const elementRegistry = modeler.get('elementRegistry')
+      const processElement = elementRegistry.find((el: any) => el.type === 'bpmn:Process')
+      return processElement
+    } catch (error) {
+      console.error('获取Process元素失败:', error)
+      return null
+    }
+  }
+
+  // 加载Process数据
+  const loadProcessData = () => {
+    const processElement = getProcessElement()
+    if (!processElement) {
+      // 如果没有找到Process元素，使用默认值
+      setProcessConfig({
+        id: 'Process_1',
+        name: '流程',
+        isExecutable: false,
+        documentation: ''
+      })
+      return
+    }
+
+    const bo = processElement.businessObject
+    setProcessConfig({
+      id: bo?.id || processElement.id || 'Process_1',
+      name: bo?.name || '',
+      isExecutable: bo?.isExecutable || false,
+      documentation: bo?.documentation?.[0]?.text || ''
+    })
+    setHasChanges(false)
+  }
+
   // 重置表单
   const resetForm = () => {
     setElementName('')
@@ -88,6 +143,8 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
     setEventConfig({})
     setGatewayCondition({})
     setHasChanges(false)
+    // 加载Process数据
+    loadProcessData()
   }
 
   // 监听选中元素变化
@@ -108,11 +165,56 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
       loadElementData(selectedElement)
       prevSelectedElementRef.current = selectedElement
     } else {
-      // 重置表单
+      // 重置表单并加载Process数据
       resetForm()
       prevSelectedElementRef.current = null
     }
   }, [selectedElement]) // 只监听 selectedElement 变化
+
+  // 初始化时加载Process数据
+  useEffect(() => {
+    if (!selectedElement) {
+      loadProcessData()
+    }
+  }, []) // 仅在组件挂载时执行
+
+  // 监听 modeler 的元素变化事件，同步属性面板数据
+  useEffect(() => {
+    const modeler = useBpmnStore.getState().modelerRef
+    if (!modeler) return
+
+    const handleElementChanged = (event: any) => {
+      const { element } = event
+      
+      // 如果当前选中的元素被修改了，刷新表单数据
+      if (selectedElement && selectedElement.id === element.id) {
+        const updatedElement: BpmnElement = {
+          id: element.id,
+          type: element.type as any,
+          name: element.businessObject?.name,
+          businessObject: element.businessObject
+        }
+        
+        // 刷新表单数据
+        loadElementData(updatedElement)
+        
+        // 同时更新 store 中的 selectedElement
+        const { setSelectedElement } = useBpmnStore.getState()
+        setSelectedElement(updatedElement)
+      }
+      
+      // 如果修改的是 Process 元素，刷新 Process 数据
+      if (element.type === 'bpmn:Process') {
+        loadProcessData()
+      }
+    }
+
+    modeler.on('element.changed', handleElementChanged)
+
+    return () => {
+      modeler.off('element.changed', handleElementChanged)
+    }
+  }, [selectedElement]) // 当 selectedElement 变化时重新绑定事件
 
   // 更新本地状态（不应用到画布）
   const handleNameChange = (newName: string) => {
@@ -213,10 +315,65 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
     }
   }
 
-  // 保存所有修改到画布（用于手动保存按钮）
-  const handleSave = () => {
-    if (!selectedElement) return
-    handleSaveElement(selectedElement)
+  // Process属性变更处理
+  const handleProcessConfigChange = (key: keyof ProcessConfig, value: any) => {
+    setProcessConfig(prev => ({ ...prev, [key]: value }))
+    setHasChanges(true)
+  }
+
+  // 保存Process属性
+  const handleSaveProcess = () => {
+    const modeler = useBpmnStore.getState().modelerRef
+    if (!modeler) return
+
+    try {
+      const processElement = getProcessElement()
+      if (!processElement) {
+        console.warn('未找到Process元素')
+        return
+      }
+
+      const modeling = modeler.get('modeling')
+      
+      // 准备更新的属性
+      const properties: any = {}
+
+      // 更新名称
+      if (processConfig.name !== (processElement.businessObject?.name || '')) {
+        properties.name = processConfig.name
+      }
+
+      // 更新isExecutable
+      if (processConfig.isExecutable !== (processElement.businessObject?.isExecutable || false)) {
+        properties.isExecutable = processConfig.isExecutable
+      }
+
+      // 更新文档
+      const currentDoc = processElement.businessObject?.documentation?.[0]?.text || ''
+      if (processConfig.documentation !== currentDoc) {
+        properties.documentation = processConfig.documentation ? [{ text: processConfig.documentation }] : []
+      }
+
+      // 应用所有更改
+      if (Object.keys(properties).length > 0) {
+        modeling.updateProperties(processElement, properties)
+        const { setHasUnsavedChanges, pushToUndoStack, setBpmnXml, bpmnXml } = useBpmnStore.getState()
+        setHasUnsavedChanges(true)
+        console.log('Process属性已保存:', properties)
+        
+        // 触发 XML 更新
+        modeler.saveXML({ format: true }).then(({ xml }: { xml: string }) => {
+          if (xml) {
+            pushToUndoStack(bpmnXml)
+            setBpmnXml(xml)
+          }
+        })
+      }
+
+      setHasChanges(false)
+    } catch (error) {
+      console.error('保存Process属性失败:', error)
+    }
   }
 
   // 放弃修改
@@ -238,8 +395,20 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
           formKey: bo?.formKey || ''
         })
       }
+    } else {
+      // 放弃Process属性修改，重新加载
+      loadProcessData()
     }
     setHasChanges(false)
+  }
+
+  // 保存当前修改（根据是否选中元素）
+  const handleSave = () => {
+    if (selectedElement) {
+      handleSaveElement(selectedElement)
+    } else {
+      handleSaveProcess()
+    }
   }
 
   // 确认对话框处理函数
@@ -522,16 +691,95 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
     )
   }
 
-  // 如果没有选中元素
+  // 渲染Process属性
+  const renderProcessProperties = () => (
+    <div className="properties-panel__section">
+      <h4 className="properties-panel__section-title">流程属性</h4>
+      
+      <div className="properties-panel__field">
+        <label className="properties-panel__label">流程ID</label>
+        <input
+          type="text"
+          className="properties-panel__input"
+          value={processConfig.id}
+          onChange={(e) => handleProcessConfigChange('id', e.target.value)}
+          placeholder="流程ID"
+          disabled
+        />
+      </div>
+      
+      <div className="properties-panel__field">
+        <label className="properties-panel__label">流程名称</label>
+        <input
+          type="text"
+          className="properties-panel__input"
+          value={processConfig.name}
+          onChange={(e) => handleProcessConfigChange('name', e.target.value)}
+          placeholder="输入流程名称"
+        />
+      </div>
+      
+      <div className="properties-panel__field">
+        <label className="properties-panel__checkbox-label">
+          <input
+            type="checkbox"
+            className="properties-panel__checkbox"
+            checked={processConfig.isExecutable}
+            onChange={(e) => handleProcessConfigChange('isExecutable', e.target.checked)}
+          />
+          可执行
+        </label>
+      </div>
+      
+      <div className="properties-panel__field">
+        <label className="properties-panel__label">流程文档</label>
+        <textarea
+          className="properties-panel__textarea"
+          value={processConfig.documentation}
+          onChange={(e) => handleProcessConfigChange('documentation', e.target.value)}
+          placeholder="输入流程说明..."
+          rows={3}
+        />
+      </div>
+    </div>
+  )
+
+  // 如果没有选中元素，显示Process属性
   if (!selectedElement) {
     return (
       <div className={`properties-panel ${className || ''}`}>
-        <div className="properties-panel__empty">
-          <div className="properties-panel__empty-icon">📝</div>
-          <div className="properties-panel__empty-text">
-            选择一个元素以查看和编辑其属性
+        <div className="properties-panel__header">
+          <h3 className="properties-panel__title">属性面板</h3>
+          <div className="properties-panel__element-info">
+            <span className="properties-panel__element-type">
+              流程
+            </span>
           </div>
         </div>
+
+        <div className="properties-panel__content">
+          {renderProcessProperties()}
+        </div>
+
+        {/* 保存按钮区域 */}
+        {hasChanges && (
+          <div className="properties-panel__footer">
+            <div className="properties-panel__actions">
+              <button
+                className="properties-panel__btn properties-panel__btn--discard"
+                onClick={handleDiscard}
+              >
+                放弃
+              </button>
+              <button
+                className="properties-panel__btn properties-panel__btn--save"
+                onClick={handleSave}
+              >
+                💾 保存
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     )
   }

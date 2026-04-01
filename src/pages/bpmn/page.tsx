@@ -3,6 +3,8 @@ import BpmnDesigner from './components/BpmnDesigner'
 import ProcessList from './components/ProcessList'
 import PropertiesPanel from './components/PropertiesPanel'
 import Toolbar from './components/Toolbar'
+import XmlEditor from './components/XmlEditor'
+import NodeListEditor from './components/NodeListEditor'
 import Icon from '../../components/Icon'
 import { useBpmnStore } from '../../stores/bpmnStore'
 import { bpmnService } from '../../services/bpmn'
@@ -12,12 +14,15 @@ import './index.scss'
 // 保存状态枚举
 type SaveStatus = 'saved' | 'unsaved' | 'saving'
 
+type TabMode = 'designer' | 'xml' | 'nodes'
+
 const BpmnPage: React.FC = () => {
   const designerRef = useRef<any>(null)
   const [showProcessList, setShowProcessList] = useState(true)
   const [showPropertiesPanel, setShowPropertiesPanel] = useState(true)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
   const [pendingProcess, setPendingProcess] = useState<ProcessDefinition | null>(null)
+  const [activeTab, setActiveTab] = useState<TabMode>('designer')
 
   const {
     bpmnXml,
@@ -215,9 +220,45 @@ const BpmnPage: React.FC = () => {
       </div>
 
       <div className="bpmn-page__content">
-        {/* BPMN设计器主体 */}
+        {/* 主编辑区域 */}
         <div className="bpmn-page__main">
-          <BpmnDesigner ref={designerRef} />
+          {/* 标签页切换 */}
+          <div className="bpmn-page__tabs">
+            <button
+              className={`bpmn-page__tab ${activeTab === 'designer' ? 'bpmn-page__tab--active' : ''}`}
+              onClick={() => setActiveTab('designer')}
+            >
+              <Icon name="settings" size={14} />
+              设计器
+            </button>
+            <button
+              className={`bpmn-page__tab ${activeTab === 'xml' ? 'bpmn-page__tab--active' : ''}`}
+              onClick={() => setActiveTab('xml')}
+            >
+              <Icon name="document" size={14} />
+              XML 编辑器
+            </button>
+            <button
+              className={`bpmn-page__tab ${activeTab === 'nodes' ? 'bpmn-page__tab--active' : ''}`}
+              onClick={() => setActiveTab('nodes')}
+            >
+              <Icon name="list" size={14} />
+              节点列表
+            </button>
+          </div>
+
+          {/* 标签页内容 */}
+          <div className="bpmn-page__tab-content">
+            {activeTab === 'designer' && (
+              <BpmnDesigner ref={designerRef} />
+            )}
+            {activeTab === 'xml' && (
+              <XmlEditor />
+            )}
+            {activeTab === 'nodes' && (
+              <NodeListEditor />
+            )}
+          </div>
         </div>
 
         {/* 属性面板侧边栏 */}

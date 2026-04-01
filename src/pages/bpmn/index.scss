@@ -202,6 +202,48 @@
     flex: 1;
     overflow: hidden;
     position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  &__tabs {
+    display: flex;
+    background: #252526;
+    border-bottom: 1px solid #3c3c3c;
+    padding: 0 8px;
+    flex-shrink: 0;
+  }
+
+  &__tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    border: none;
+    background: transparent;
+    color: #808080;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+
+    &:hover {
+      color: #cccccc;
+      background: #2d2d2d;
+    }
+
+    &--active {
+      color: #ffffff;
+      background: #1e1e1e;
+      border-bottom-color: #0e639c;
+    }
+  }
+
+  &__tab-content {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
   }
 
   &__statusbar {

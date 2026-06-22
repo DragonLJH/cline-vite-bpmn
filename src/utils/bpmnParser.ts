@@ -1,5 +1,8 @@
 // BPMN XML 解析工具函数
 
+import { parseFfmpegConfigFromXmlElement } from '../services/ffmpeg/configCodec'
+import type { WorkflowGraph, WorkflowTask } from '../types/bpmn'
+
 // 解析后的节点接口
 export interface ParsedNode {
   id: string
@@ -195,6 +198,117 @@ export const parseNodesByType = (xmlString: string): Record<string, ParsedNode[]
 
   return grouped
 }
+
+function parseDurationSeconds(duration: string | undefined): number | undefined {
+  if (!duration) return undefined
+  const parts = duration.trim().split(':').map(Number)
+  if (parts.some(n => Number.isNaN(n))) return undefined
+  if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  }
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1]
+  }
+  const asNumber = parseFloat(duration)
+  return Number.isFinite(asNumber) ? asNumber : undefined
+}
+
+/**
+ * 解析 FFmpeg 工作流图：收集 ServiceTask 配置并按 sequenceFlow 拓扑排序执行顺序。
+ * 优先从 StartEvent 遍历（兼容旧流程），无开始节点时从入度为 0 的 ServiceTask 开始。
+ */
+export function parseWorkflowGraph(xmlString: string): WorkflowGraph | null {
+  const doc = parseXmlToDoc(xmlString)
+  if (!doc) return null
+
+  const processElement = doc.querySelector('bpmn\\:process, process')
+  if (!processElement) return null
+
+  const processId = processElement.getAttribute('id') || 'Process_1'
+
+  const serviceTasks = processElement.querySelectorAll('bpmn\\:serviceTask, serviceTask')
+  if (serviceTasks.length === 0) return null
+
+  const tasks: WorkflowTask[] = []
+  serviceTasks.forEach(el => {
+    const element = el as Element
+    tasks.push({
+      id: element.getAttribute('id') || '',
+      name: element.getAttribute('name') || undefined,
+      ffmpegConfig: parseFfmpegConfigFromXmlElement(element)
+    })
+  })
+
+  const taskIds = new Set(tasks.map(t => t.id))
+
+  const flowElements = processElement.querySelectorAll('bpmn\\:sequenceFlow, sequenceFlow')
+  const adjacency = new Map<string, string[]>()
+  const inDegree = new Map<string, number>()
+
+  const ensureNode = (id: string) => {
+    if (!adjacency.has(id)) adjacency.set(id, [])
+    if (!inDegree.has(id)) inDegree.set(id, 0)
+  }
+
+  flowElements.forEach(flow => {
+    const sourceRef = flow.getAttribute('sourceRef')
+    const targetRef = flow.getAttribute('targetRef')
+    if (!sourceRef || !targetRef) return
+
+    ensureNode(sourceRef)
+    ensureNode(targetRef)
+    adjacency.get(sourceRef)!.push(targetRef)
+    inDegree.set(targetRef, (inDegree.get(targetRef) || 0) + 1)
+  })
+
+  tasks.forEach(t => ensureNode(t.id))
+
+  const startEvents = processElement.querySelectorAll('bpmn\\:startEvent, startEvent')
+  const startIds: string[] = []
+  startEvents.forEach(el => {
+    const id = el.getAttribute('id')
+    if (id) startIds.push(id)
+  })
+
+  const executionOrder: string[] = []
+  const visited = new Set<string>()
+  const queue: string[] = []
+
+  startIds.forEach(id => {
+    if ((inDegree.get(id) || 0) === 0) queue.push(id)
+  })
+
+  if (queue.length === 0) {
+    tasks.forEach(t => {
+      if ((inDegree.get(t.id) || 0) === 0) queue.push(t.id)
+    })
+  }
+
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    if (visited.has(current)) continue
+    visited.add(current)
+
+    if (taskIds.has(current)) {
+      executionOrder.push(current)
+    }
+
+    const neighbors = adjacency.get(current) || []
+    neighbors.forEach(next => {
+      const nextDegree = (inDegree.get(next) || 0) - 1
+      inDegree.set(next, nextDegree)
+      if (nextDegree <= 0 && !visited.has(next)) {
+        queue.push(next)
+      }
+    })
+  }
+
+  if (executionOrder.length === 0) return null
+
+  return { processId, tasks, executionOrder }
+}
+
+export { parseDurationSeconds }
 
 // 获取节点的可读类型名称
 export const getNodeTypeName = (type: string): string => {

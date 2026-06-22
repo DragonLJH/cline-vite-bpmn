@@ -1,0 +1,21 @@
+{
+  "name": "FFmpeg",
+  "prefix": "ffmpeg",
+  "uri": "http://cline-vite-bpmn/schema/ffmpeg",
+  "xml": {
+    "tagAlias": "lowerCase"
+  },
+  "types": [
+    {
+      "name": "Config",
+      "superClass": ["Element"],
+      "properties": [
+        {
+          "name": "json",
+          "isAttr": true,
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

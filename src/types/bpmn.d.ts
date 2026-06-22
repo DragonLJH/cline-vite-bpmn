@@ -201,3 +201,42 @@ export interface ValidationResult {
   errors: BpmnError[]
   warnings: BpmnError[]
 }
+
+// FFmpeg 工作流类型（统一 JSON 配置格式）
+export type {
+  FfmpegJobAction as FfmpegOperation,
+  FfmpegJobConfig as FfmpegTaskConfig,
+  FfmpegJobInput,
+  FfmpegJobOutput,
+  FfmpegJobVideo,
+  FfmpegJobAudio,
+  FfmpegJobFilter,
+  FfmpegDrawtextFilter,
+  FfmpegOverlayFilter,
+  FfmpegJobGlobal,
+  FfmpegJobTrim
+} from '../services/ffmpeg/jobConfig'
+
+export interface WorkflowTask {
+  id: string
+  name?: string
+  ffmpegConfig?: import('../services/ffmpeg/jobConfig').FfmpegJobConfig
+}
+
+export interface WorkflowGraph {
+  processId: string
+  tasks: WorkflowTask[]
+  executionOrder: string[]
+}
+
+export interface MediaInfo {
+  duration?: string
+  durationSeconds?: number
+  width?: number
+  height?: number
+  fps?: number
+  videoCodec?: string
+  audioCodec?: string
+  bitrate?: string
+  raw?: string
+}

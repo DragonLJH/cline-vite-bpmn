@@ -1,5 +1,5 @@
 import React, { useRef } from 'react'
-import { useBpmnStore } from '../../../../stores/bpmnStore'
+import { usePageBpmnStore } from '../../../../contexts/BpmnStoreContext'
 import { bpmnService } from '../../../../services/bpmn'
 import type { ToolbarAction } from '../../../../types/bpmn'
 import './index.scss'
@@ -37,7 +37,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
     currentProcessId,
     processList,
     updateProcess
-  } = useBpmnStore()
+  } = usePageBpmnStore()
 
   // 处理工具栏操作
   const handleAction = async (action: ToolbarAction) => {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import { useBpmnStore } from '../../../../stores/bpmnStore'
+import { usePageBpmnStore } from '../../../../contexts/BpmnStoreContext'
 import { 
   parseAllNodes, 
   parseNodesByType, 
@@ -18,7 +18,7 @@ interface NodeListEditorProps {
 type ViewMode = 'list' | 'group'
 
 const NodeListEditor: React.FC<NodeListEditorProps> = ({ className }) => {
-  const { bpmnXml, setBpmnXml, modelerRef, pushToUndoStack, setHasUnsavedChanges, setSelectedElement } = useBpmnStore()
+  const { bpmnXml, setBpmnXml, modelerRef, pushToUndoStack, setHasUnsavedChanges, setSelectedElement } = usePageBpmnStore()
   
   const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [searchText, setSearchText] = useState('')

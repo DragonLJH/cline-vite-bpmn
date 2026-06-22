@@ -18,5 +18,8 @@
   },
   "linux": {
     "target": "AppImage"
-  }
+  },
+  "asarUnpack": [
+    "**/ffmpeg/**"
+  ]
 }

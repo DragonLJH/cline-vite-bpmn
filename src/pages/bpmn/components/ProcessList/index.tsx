@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import Icon from '../../../../components/Icon'
-import { useBpmnStore } from '../../../../stores/bpmnStore'
+import { usePageBpmnStore } from '../../../../contexts/BpmnStoreContext'
 import { bpmnService } from '../../../../services/bpmn'
 import type { ProcessDefinition } from '../../../../types/bpmn'
 import './index.scss'
@@ -21,8 +21,9 @@ const ProcessList: React.FC<ProcessListProps> = ({ className, onSelectProcess, l
     deleteProcess,
     setBpmnXml,
     clearHistory,
-    setHasUnsavedChanges
-  } = useBpmnStore()
+    setHasUnsavedChanges,
+    createNewProcess
+  } = usePageBpmnStore()
 
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newProcessName, setNewProcessName] = useState('')
@@ -40,7 +41,7 @@ const ProcessList: React.FC<ProcessListProps> = ({ className, onSelectProcess, l
   const handleCreateProcess = () => {
     if (!newProcessName.trim()) return
 
-    const newProcess = bpmnService.createProcess(
+    const newProcess = createNewProcess(
       newProcessName.trim(),
       newProcessDescription.trim() || undefined
     )

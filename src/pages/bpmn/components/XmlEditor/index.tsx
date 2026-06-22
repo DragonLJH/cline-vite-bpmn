@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { useBpmnStore } from '../../../../stores/bpmnStore'
+import { usePageBpmnStore, usePageBpmnStoreHook } from '../../../../contexts/BpmnStoreContext'
 import { formatXml, validateXml } from '../../../../utils/bpmnParser'
 import Icon from '../../../../components/Icon'
 import './index.scss'
 
 const XmlEditor: React.FC = () => {
-  const { bpmnXml, setBpmnXml, setHasUnsavedChanges } = useBpmnStore()
+  const { bpmnXml, setBpmnXml, setHasUnsavedChanges } = usePageBpmnStore()
   const [localXml, setLocalXml] = useState(bpmnXml)
   const [validationResult, setValidationResult] = useState<{ valid: boolean; error?: string }>({ valid: true })
   const [isFormatting, setIsFormatting] = useState(false)

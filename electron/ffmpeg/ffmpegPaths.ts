@@ -50,6 +50,22 @@ export function createOutputPath(stepId: string, ext: string = 'mp4'): string {
   return path.join(getFfmpegOutputDir(), `${safeId}_${timestamp}.${ext}`)
 }
 
+function escapeConcatPath(filePath: string): string {
+  return filePath.replace(/\\/g, '/').replace(/'/g, "'\\''")
+}
+
+export function createConcatListPath(filePaths: string[]): string {
+  const id = crypto
+    .createHash('md5')
+    .update(`${filePaths.join('|')}_${Date.now()}`)
+    .digest('hex')
+    .slice(0, 12)
+  const listPath = path.join(getFfmpegOutputDir(), `concat_${id}.txt`)
+  const content = filePaths.map(filePath => `file '${escapeConcatPath(filePath)}'`).join('\n')
+  fs.writeFileSync(listPath, content, 'utf-8')
+  return listPath
+}
+
 export function getFfmpegPreviewDir(): string {
   const previewDir = path.join(app.getPath('userData'), 'ffmpeg-preview')
   if (!fs.existsSync(previewDir)) {

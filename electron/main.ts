@@ -1,8 +1,8 @@
 import { app, BrowserWindow, ipcMain, dialog, Notification, clipboard, protocol } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
-import { createOutputPath, createPreviewPath } from './ffmpeg/ffmpegPaths'
-import { ffmpegManager } from './ffmpeg/ffmpegManager'
+import { registerFfmpegIpcHandlers } from './ffmpeg/ipc'
+import { registerLocalMediaProtocol } from './ffmpeg/localMediaProtocol'
 
 function createWindow() {
   // 获取 preload 脚本路径
@@ -287,147 +287,7 @@ ipcMain.handle('bpmn:saveFile', async (event, content: string, defaultName: stri
   return { success: false }
 })
 
-// ========== FFmpeg 操作 ==========
-
-ipcMain.handle('ffmpeg:probe', async (_event, payload: { inputPath: string }) => {
-  console.log(`[ffmpeg:probe] 探测文件: ${payload.inputPath}`)
-  try {
-    const result = await ffmpegManager.probe(payload.inputPath)
-    console.log('[ffmpeg:probe] 探测结果:', {
-      success: result.success,
-      duration: result.info?.duration,
-      resolution: result.info?.width && result.info?.height
-        ? `${result.info.width}x${result.info.height}`
-        : undefined,
-      error: result.error
-    })
-    return result
-  } catch (error) {
-    return { success: false, error: (error as Error).message }
-  }
-})
-
-ipcMain.handle(
-  'ffmpeg:run',
-  async (event, payload: { args: string[]; taskId?: string; duration?: number }) => {
-    const taskId = payload.taskId || `task_${Date.now()}`
-    const sender = event.sender
-    const previewArgs = payload.args.map(arg => (/\s/.test(arg) ? `"${arg}"` : arg)).join(' ')
-    console.log(`[ffmpeg:run][${taskId}] 收到命令: ffmpeg ${previewArgs}`)
-
-    try {
-      const result = await ffmpegManager.runWithArgs(payload.args, taskId, {
-        duration: payload.duration,
-        onProgress: (data) => {
-          sender.send('ffmpeg:progress', {
-            taskId: data.taskId,
-            progress: data.progress
-          })
-        }
-      })
-      console.log(`[ffmpeg:run][${taskId}] 执行结果:`, {
-        success: result.success,
-        code: result.code,
-        errorReason: result.errorReason,
-        stderrTail: result.stderr?.split('\n').filter(Boolean).slice(-5).join(' | ')
-      })
-      return result
-    } catch (error) {
-      return {
-        success: false,
-        code: null,
-        stdout: '',
-        stderr: (error as Error).message,
-        errorReason: (error as Error).message,
-        taskId
-      }
-    }
-  }
-)
-
-ipcMain.handle(
-  'ffmpeg:runJob',
-  async (event, payload: {
-    config: import('./ffmpeg/jobConfig').FfmpegJobConfig
-    inputPath: string
-    outputPath: string
-    taskId: string
-    duration?: number
-    overlayImages?: string[]
-  }) => {
-    const sender = event.sender
-    return ffmpegManager.executeJob(
-      payload.config,
-      payload.inputPath,
-      payload.outputPath,
-      payload.taskId,
-      {
-        duration: payload.duration,
-        resolvedImages: payload.overlayImages,
-        onProgress: (data) => {
-          sender.send('ffmpeg:progress', {
-            taskId: data.taskId,
-            progress: data.progress
-          })
-        }
-      }
-    )
-  }
-)
-
-ipcMain.handle('ffmpeg:createOutputPath', async (_event, payload: { stepId: string; ext?: string }) => {
-  try {
-    const outputPath = createOutputPath(payload.stepId, payload.ext || 'mp4')
-    return { success: true, path: outputPath }
-  } catch (error) {
-    return { success: false, error: (error as Error).message }
-  }
-})
-
-ipcMain.handle('ffmpeg:cancel', async (_event, payload: { taskId: string }) => {
-  return ffmpegManager.cancel(payload.taskId)
-})
-
-ipcMain.handle(
-  'ffmpeg:snapshot',
-  async (_event, payload: { inputPath: string; time?: string | number; accurate?: boolean }) => {
-    try {
-      const timeValue = payload.time ?? '0'
-      const time = typeof timeValue === 'number' ? String(timeValue) : timeValue
-      const outputPath = createPreviewPath(payload.inputPath, time)
-
-      const result = payload.accurate
-        ? await ffmpegManager.screenshotAccurate(payload.inputPath, time, outputPath)
-        : await ffmpegManager.screenshot(payload.inputPath, time, outputPath)
-
-      if (!result.success) {
-        return { success: false, error: result.error || '截帧失败' }
-      }
-
-      return { success: true, path: outputPath, time }
-    } catch (error) {
-      return { success: false, error: (error as Error).message }
-    }
-  }
-)
-
-ipcMain.handle(
-  'ffmpeg:readPreviewAsDataUrl',
-  async (_event, payload: { filePath: string }) => {
-    try {
-      if (!fs.existsSync(payload.filePath)) {
-        return { success: false, error: '预览文件不存在' }
-      }
-      const buffer = fs.readFileSync(payload.filePath)
-      const ext = path.extname(payload.filePath).toLowerCase()
-      const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png'
-      const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`
-      return { success: true, dataUrl }
-    } catch (error) {
-      return { success: false, error: (error as Error).message }
-    }
-  }
-)
+registerFfmpegIpcHandlers()
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -441,19 +301,6 @@ protocol.registerSchemesAsPrivileged([
     }
   }
 ])
-
-function registerLocalMediaProtocol() {
-  protocol.registerFileProtocol('local-media', (request, callback) => {
-    try {
-      const url = request.url.replace(/^local-media:\/\//, '')
-      const filePath = decodeURIComponent(url)
-      callback({ path: path.normalize(filePath) })
-    } catch (error) {
-      console.error('[local-media] 解析失败:', error)
-      callback({ error: -2 })
-    }
-  })
-}
 
 app.whenReady().then(() => {
   registerLocalMediaProtocol()

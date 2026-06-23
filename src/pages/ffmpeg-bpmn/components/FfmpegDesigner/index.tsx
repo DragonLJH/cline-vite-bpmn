@@ -3,7 +3,7 @@ import BpmnModeler from 'bpmn-js/lib/Modeler'
 import type { BpmnElement } from '../../../../types/bpmn'
 import { useFfmpegBpmnStore } from '../../../../stores/ffmpegBpmnStore'
 import { useXmlSync, XmlDiffAnalyzer } from '../../../../utils/bpmnXmlSync'
-import { DEFAULT_FFMPEG_CONFIG, updateFfmpegConfigOnElement } from '../../../../services/ffmpeg/configCodec'
+import { DEFAULT_FFMPEG_CONFIG, persistFfmpegConfigToModel } from '../../../../services/ffmpeg/configCodec'
 import ffmpegModdle from '../../../../moddle/ffmpeg.json'
 import customPalette from '../../../bpmn/modules/customPalette'
 import customContextPad from '../../../bpmn/modules/customContextPad'
@@ -31,14 +31,19 @@ interface FfmpegDesignerProps {
   className?: string
 }
 
+const XML_EXPORT_DEBOUNCE_MS = 150
+
 const FfmpegDesigner = React.forwardRef<FfmpegDesignerRef, FfmpegDesignerProps>(({ className }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const modelerRef = useRef<BpmnModeler | null>(null)
   const [isModelerReady, setIsModelerReady] = useState(false)
+  const exportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastModelerSyncTokenRef = useRef(0)
 
   const {
     bpmnXml,
-    setBpmnXml,
+    modelerXmlSyncToken,
+    setBpmnXmlFromModeler,
     setSelectedElement,
     pushToUndoStack,
     zoomLevel,
@@ -47,6 +52,30 @@ const FfmpegDesigner = React.forwardRef<FfmpegDesignerRef, FfmpegDesignerProps>(
   } = useFfmpegBpmnStore()
 
   const xmlSyncManager = useXmlSync(modelerRef.current)
+
+  const exportXmlFromModeler = useCallback(async () => {
+    if (!modelerRef.current) return
+
+    try {
+      const { xml } = await modelerRef.current.saveXML({ format: true })
+      if (xml) {
+        pushToUndoStack(useFfmpegBpmnStore.getState().bpmnXml)
+        setBpmnXmlFromModeler(xml)
+      }
+    } catch (error) {
+      console.error('保存XML失败:', error)
+    }
+  }, [pushToUndoStack, setBpmnXmlFromModeler])
+
+  const scheduleExportXmlFromModeler = useCallback(() => {
+    if (exportTimerRef.current) clearTimeout(exportTimerRef.current)
+    exportTimerRef.current = setTimeout(() => {
+      void exportXmlFromModeler()
+    }, XML_EXPORT_DEBOUNCE_MS)
+  }, [exportXmlFromModeler])
+
+  const scheduleExportRef = useRef(scheduleExportXmlFromModeler)
+  scheduleExportRef.current = scheduleExportXmlFromModeler
 
   useEffect(() => {
     if (!containerRef.current || modelerRef.current) return
@@ -72,6 +101,7 @@ const FfmpegDesigner = React.forwardRef<FfmpegDesignerRef, FfmpegDesignerProps>(
 
     modeler.on('selection.changed', (event: any) => {
       const { newSelection } = event
+
       if (newSelection.length === 1) {
         const element = newSelection[0]
         const bpmnElement: BpmnElement = {
@@ -90,39 +120,21 @@ const FfmpegDesigner = React.forwardRef<FfmpegDesignerRef, FfmpegDesignerProps>(
       const shape = event.context?.shape
       if (!shape || shape.type !== 'bpmn:ServiceTask') return
 
-      const moddle = modeler.get('moddle')
-      const modeling = modeler.get('modeling')
-      const bo = shape.businessObject
-      const extensionElements = updateFfmpegConfigOnElement(moddle, bo, {
+      persistFfmpegConfigToModel(modeler, shape.id, {
         ...DEFAULT_FFMPEG_CONFIG,
         output: { ...DEFAULT_FFMPEG_CONFIG.output, var: `${shape.id}.output` }
       })
-      modeling.updateModdleProperties(shape, { extensionElements })
-    })
-
-    modeler.on('element.changed', (event: any) => {
-      const { element } = event
-      saveCurrentXml()
-
-      const { selectedElement } = useFfmpegBpmnStore.getState()
-      if (selectedElement && selectedElement.id === element.id) {
-        setSelectedElement({
-          id: element.id,
-          type: element.type as BpmnElement['type'],
-          name: element.businessObject?.name,
-          businessObject: element.businessObject
-        })
-      }
     })
 
     modeler.on('commandStack.changed', () => {
-      saveCurrentXml()
+      scheduleExportRef.current()
     })
 
     importXml(bpmnXml)
     setIsModelerReady(true)
 
     return () => {
+      if (exportTimerRef.current) clearTimeout(exportTimerRef.current)
       if (modelerRef.current) {
         modelerRef.current.destroy()
         modelerRef.current = null
@@ -143,18 +155,8 @@ const FfmpegDesigner = React.forwardRef<FfmpegDesignerRef, FfmpegDesignerProps>(
   }, [])
 
   const saveCurrentXml = useCallback(async () => {
-    if (!modelerRef.current) return
-
-    try {
-      const { xml } = await modelerRef.current.saveXML({ format: true })
-      if (xml) {
-        pushToUndoStack(bpmnXml)
-        setBpmnXml(xml)
-      }
-    } catch (error) {
-      console.error('保存XML失败:', error)
-    }
-  }, [bpmnXml, setBpmnXml, pushToUndoStack])
+    await exportXmlFromModeler()
+  }, [exportXmlFromModeler])
 
   const syncXml = useCallback(async (
     newXml: string,
@@ -182,16 +184,21 @@ const FfmpegDesigner = React.forwardRef<FfmpegDesignerRef, FfmpegDesignerProps>(
   }, [xmlSyncManager, importXml])
 
   useEffect(() => {
-    if (isModelerReady && modelerRef.current && xmlSyncManager) {
-      modelerRef.current.saveXML({ format: true })
-        .then(({ xml: currentXml }) => {
-          if (currentXml && XmlDiffAnalyzer.hasSignificantChanges(currentXml, bpmnXml)) {
-            syncXml(bpmnXml, { preserveViewState: true, useSmartSync: true })
-          }
-        })
-        .catch(() => importXml(bpmnXml))
+    if (!isModelerReady || !modelerRef.current || !xmlSyncManager) return
+
+    if (modelerXmlSyncToken !== lastModelerSyncTokenRef.current) {
+      lastModelerSyncTokenRef.current = modelerXmlSyncToken
+      return
     }
-  }, [bpmnXml, isModelerReady, xmlSyncManager, syncXml, importXml])
+
+    modelerRef.current.saveXML({ format: true })
+      .then(({ xml: currentXml }) => {
+        if (currentXml && XmlDiffAnalyzer.hasSignificantChanges(currentXml, bpmnXml)) {
+          syncXml(bpmnXml, { preserveViewState: true, useSmartSync: true })
+        }
+      })
+      .catch(() => importXml(bpmnXml))
+  }, [bpmnXml, modelerXmlSyncToken, isModelerReady, xmlSyncManager, syncXml, importXml])
 
   useEffect(() => {
     if (modelerRef.current && isModelerReady) {

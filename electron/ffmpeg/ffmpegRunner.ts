@@ -1,15 +1,15 @@
 import { ffmpegExecutor } from './executorInstance'
 import type { ExecutorOptions, FFmpegTask } from './FFmpegExecutor'
-import { FFmpegCommandBuilder } from './FFmpegCommandBuilder'
 import type { FFmpegProgress } from './progressParser'
-import { videoService, type TranscodeParams, type MediaInfo as DetailedMediaInfo } from '../services/videoService'
+import { buildJobCommand } from './jobCommandBuilder'
+import { videoService, type MediaInfo as DetailedMediaInfo } from '../services/videoService'
 import { toFlatMediaInfo, parseFlatMediaInfo } from '../services/mediaInfoAdapter'
 import type { FlatMediaInfo } from '../services/types'
+import type { FfmpegJobConfig } from './jobConfig'
 
 export type MediaInfo = FlatMediaInfo
 
-export { videoService }
-export type { TranscodeParams, MediaInfo as VideoMediaInfo, StreamInfo } from '../services/videoService'
+export type { MediaInfo as VideoMediaInfo, StreamInfo } from '../services/videoService'
 export type { FlatMediaInfo } from '../services/types'
 export { toFlatMediaInfo } from '../services/mediaInfoAdapter'
 
@@ -17,6 +17,9 @@ export interface FfmpegRunOptions {
   taskId?: string
   duration?: number
   timeout?: number
+  maxThreads?: number
+  priority?: 'low' | 'normal' | 'high'
+  memoryLimit?: string
   onProgress?: (data: { taskId?: string; progress: FFmpegProgress }) => void
 }
 
@@ -46,6 +49,9 @@ function toExecutorOptions(options?: FfmpegRunOptions): ExecutorOptions {
   return {
     duration: options.duration,
     timeout: options.timeout,
+    maxThreads: options.maxThreads,
+    priority: options.priority,
+    memoryLimit: options.memoryLimit,
     onProgress: options.onProgress
       ? (progress) => options.onProgress!({ taskId: options.taskId, progress })
       : undefined
@@ -92,11 +98,12 @@ export function runFfmpegTask(args: string[], options?: FfmpegRunOptions): FFmpe
 
 export async function probeMedia(inputPath: string): Promise<FfmpegProbeResult> {
   try {
-    const builder = new FFmpegCommandBuilder()
-      .input(inputPath)
-      .custom('-hide_banner', '-f', 'null', '-', '-analyzeduration', '5000000', '-probesize', '5000000')
-
-    const args = builder.build()
+    const config: FfmpegJobConfig = {
+      type: 'ffmpeg',
+      action: 'probe',
+      global: { hideBanner: true, noStdin: true }
+    }
+    const args = buildJobCommand(config, inputPath)
     const result = await runFfmpeg(args, { timeout: 15000 })
     const detailedInfo = videoService.parseMediaInfo(result.stderr)
 
@@ -122,58 +129,4 @@ export async function getDetailedMediaInfo(inputPath: string) {
   } catch (error) {
     return { success: false as const, error: (error as Error).message }
   }
-}
-
-export async function transcodeVideo(
-  params: TranscodeParams,
-  options?: FfmpegRunOptions
-): Promise<FfmpegServiceResult> {
-  const task = videoService.transcode(
-    params,
-    options?.onProgress
-      ? (progress) => options.onProgress!({ taskId: options.taskId, progress })
-      : undefined
-  )
-  const result = await awaitTask(task)
-  return { ...result, outputPath: params.output }
-}
-
-export async function cutVideo(
-  input: string,
-  output: string,
-  start: string,
-  duration: string,
-  precise = false,
-  options?: FfmpegRunOptions
-): Promise<FfmpegServiceResult> {
-  const task = videoService.cut(input, output, start, duration, precise)
-  const result = await awaitTask(task)
-  return { ...result, outputPath: output }
-}
-
-export async function screenshotVideo(
-  input: string,
-  time: string,
-  output: string,
-  accurate = false
-): Promise<FfmpegServiceResult> {
-  const task = accurate
-    ? videoService.screenshotAccurate(input, time, output)
-    : videoService.screenshot(input, time, output)
-  const result = await awaitTask(task)
-  return { ...result, outputPath: output }
-}
-
-export async function addWatermarksVideo(
-  params: Parameters<typeof videoService.addWatermarks>[0],
-  options?: FfmpegRunOptions
-): Promise<FfmpegServiceResult> {
-  const task = videoService.addWatermarks(
-    params,
-    options?.onProgress
-      ? (progress) => options.onProgress!({ taskId: options.taskId, progress })
-      : undefined
-  )
-  const result = await awaitTask(task)
-  return { ...result, outputPath: params.output }
 }

@@ -44,6 +44,7 @@ interface FfmpegBpmnState {
   pendingFfmpegConfigs: Record<string, FfmpegJobConfig>
   previewContext: PreviewContext
   activeTab: FfmpegPageTab
+  modelerXmlSyncToken: number
 
   setProcessList: (list: ProcessDefinition[]) => void
   addProcess: (process: ProcessDefinition) => void
@@ -51,6 +52,7 @@ interface FfmpegBpmnState {
   deleteProcess: (id: string) => void
   setCurrentProcessId: (id: string | null) => void
   setBpmnXml: (xml: string) => void
+  setBpmnXmlFromModeler: (xml: string) => void
   setSelectedElement: (element: BpmnElement | null) => void
   pushToUndoStack: (xml: string) => void
   undo: () => string | null
@@ -100,6 +102,7 @@ export const useFfmpegBpmnStore = create<FfmpegBpmnState>((set, get) => ({
   pendingFfmpegConfigs: {},
   previewContext: { ...DEFAULT_PREVIEW_CONTEXT },
   activeTab: 'designer',
+  modelerXmlSyncToken: 0,
 
   setProcessList: (list) => set({ processList: list }),
 
@@ -120,6 +123,10 @@ export const useFfmpegBpmnStore = create<FfmpegBpmnState>((set, get) => ({
 
   setCurrentProcessId: (id) => set({ currentProcessId: id }),
   setBpmnXml: (xml) => set({ bpmnXml: xml }),
+  setBpmnXmlFromModeler: (xml) => set((state) => ({
+    bpmnXml: xml,
+    modelerXmlSyncToken: state.modelerXmlSyncToken + 1
+  })),
   setSelectedElement: (element) => set({ selectedElement: element }),
 
   pushToUndoStack: (xml) => set((state) => {

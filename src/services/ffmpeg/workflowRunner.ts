@@ -20,7 +20,7 @@ import {
 
 } from './jobConfig'
 
-import { buildJobCommand, formatFfmpegCommandPreview } from './jobCommandBuilder'
+import { previewJobCommand } from './jobCommandBuilder'
 
 
 
@@ -112,14 +112,6 @@ function getDurationFromContext(context: Record<string, unknown>): number | unde
 
 
 
-function formatCommandLine(args: string[]): string {
-
-  return `ffmpeg ${formatFfmpegCommandPreview(args)}`
-
-}
-
-
-
 function logStepCommand(stepId: string, command: string) {
 
   console.log(`[FFmpeg Workflow][${stepId}] 执行命令:\n  ${command}`)
@@ -162,6 +154,21 @@ function resolveOverlayImages(config: FfmpegJobConfig, context: Record<string, u
 
     .map(filter => resolveFilterImage(filter.image, context))
 
+}
+
+async function getCommandPreview(
+  ffmpeg: NonNullable<Window['electronAPI']>['ffmpeg'],
+  config: FfmpegJobConfig,
+  inputPath: string,
+  outputPath?: string,
+  overlayImages: string[] = []
+): Promise<string> {
+  if (ffmpeg.previewJobCommand) {
+    const result = await ffmpeg.previewJobCommand({ config, inputPath, outputPath, overlayImages })
+    if (result.success && result.command) return result.command
+  }
+
+  return previewJobCommand(config, inputPath, outputPath)
 }
 
 
@@ -256,9 +263,7 @@ export async function runWorkflow(
 
       if (config.action === 'probe') {
 
-        const probeArgs = buildJobCommand(config, inputPath)
-
-        stepResult.command = formatCommandLine(probeArgs)
+        stepResult.command = await getCommandPreview(ffmpeg, config, inputPath)
 
         logStepCommand(stepId, stepResult.command)
 
@@ -336,11 +341,7 @@ export async function runWorkflow(
 
         const overlayImages = resolveOverlayImages(config, context)
 
-        const args = buildJobCommand(config, inputPath, outputPath, overlayImages)
-
-
-
-        stepResult.command = formatCommandLine(args)
+        stepResult.command = await getCommandPreview(ffmpeg, config, inputPath, outputPath, overlayImages)
 
         logStepCommand(stepId, stepResult.command)
 
@@ -380,29 +381,14 @@ export async function runWorkflow(
 
         try {
 
-          if (ffmpeg.runJob) {
-
-            runResult = await ffmpeg.runJob({
-
-              config,
-
-              inputPath,
-
-              outputPath,
-
-              taskId,
-
-              duration,
-
-              overlayImages
-
-            })
-
-          } else {
-
-            runResult = await ffmpeg.run({ args, taskId, duration })
-
-          }
+          runResult = await ffmpeg.runJob({
+            config,
+            inputPath,
+            outputPath,
+            taskId,
+            duration,
+            overlayImages
+          })
 
         } finally {
 

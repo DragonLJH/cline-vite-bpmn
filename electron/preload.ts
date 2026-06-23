@@ -1,41 +1,5 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
-
-interface FfmpegProgressPayload {
-  taskId: string
-  progress: {
-    frame?: number
-    fps?: number
-    bitrate?: string
-    time?: string
-    speed?: string
-    percent?: number
-  }
-}
-
-interface FfmpegProbeResult {
-  success: boolean
-  info?: {
-    duration?: string
-    durationSeconds?: number
-    width?: number
-    height?: number
-    fps?: number
-    videoCodec?: string
-    audioCodec?: string
-    bitrate?: string
-    raw?: string
-  }
-  error?: string
-}
-
-interface FfmpegRunResult {
-  success: boolean
-  code: number | null
-  stdout: string
-  stderr: string
-  errorReason?: string
-  taskId?: string
-}
+import type { FfmpegApi, FfmpegProgressPayload } from '../src/shared/electron/ffmpegApi'
 
 // 自定义 API 接口定义
 interface ElectronAPI {
@@ -81,29 +45,7 @@ interface ElectronAPI {
     openFile: () => Promise<{ success: boolean; content?: string; fileName?: string }>
     saveFile: (content: string, defaultName: string) => Promise<{ success: boolean; filePath?: string }>
   }
-  ffmpeg: {
-    probe: (payload: { inputPath: string }) => Promise<FfmpegProbeResult>
-    run: (payload: { args: string[]; taskId?: string; duration?: number }) => Promise<FfmpegRunResult>
-    runJob: (payload: {
-      config: Record<string, unknown>
-      inputPath: string
-      outputPath: string
-      taskId: string
-      duration?: number
-      overlayImages?: string[]
-    }) => Promise<FfmpegRunResult & { outputPath?: string }>
-    createOutputPath: (payload: { stepId: string; ext?: string }) => Promise<{ success: boolean; path?: string; error?: string }>
-    cancel: (payload: { taskId: string }) => Promise<{ success: boolean; error?: string }>
-    snapshot: (payload: {
-      inputPath: string
-      time?: string | number
-      accurate?: boolean
-    }) => Promise<{ success: boolean; path?: string; time?: string; error?: string }>
-    readPreviewAsDataUrl: (payload: {
-      filePath: string
-    }) => Promise<{ success: boolean; dataUrl?: string; error?: string }>
-    onProgress: (callback: (data: FfmpegProgressPayload) => void) => () => void
-  }
+  ffmpeg: FfmpegApi
   on: (channel: string, callback: (...args: unknown[]) => void) => void
   off: (channel: string, callback: (...args: unknown[]) => void) => void
   once: (channel: string, callback: (...args: unknown[]) => void) => void
@@ -144,9 +86,12 @@ const electronAPI: ElectronAPI = {
   },
   ffmpeg: {
     probe: (payload) => ipcRenderer.invoke('ffmpeg:probe', payload),
+    runRaw: (payload) => ipcRenderer.invoke('ffmpeg:runRaw', payload),
     run: (payload) => ipcRenderer.invoke('ffmpeg:run', payload),
     runJob: (payload) => ipcRenderer.invoke('ffmpeg:runJob', payload),
+    previewJobCommand: (payload) => ipcRenderer.invoke('ffmpeg:previewJobCommand', payload),
     createOutputPath: (payload) => ipcRenderer.invoke('ffmpeg:createOutputPath', payload),
+    createConcatList: (payload) => ipcRenderer.invoke('ffmpeg:createConcatList', payload),
     cancel: (payload) => ipcRenderer.invoke('ffmpeg:cancel', payload),
     snapshot: (payload) => ipcRenderer.invoke('ffmpeg:snapshot', payload),
     readPreviewAsDataUrl: (payload) => ipcRenderer.invoke('ffmpeg:readPreviewAsDataUrl', payload),

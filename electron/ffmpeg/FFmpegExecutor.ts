@@ -33,11 +33,10 @@ export interface FFmpegTask {
 export class FFmpegExecutor {
 
   private ffmpegPath: string
-  private currentPid?: number
 
   constructor() {
     this.ffmpegPath = getFfmpegBinary()
-    console.log(`[FFmpegExecutor] FFmpeg path: ${this.ffmpegPath}`)
+    appLogger.info('FFmpeg binary resolved', { ffmpegPath: this.ffmpegPath })
   }
 
   /**
@@ -86,6 +85,34 @@ export class FFmpegExecutor {
       high: -10   // 较高优先级（需要root权限）
     }
     return niceMap[priority]
+  }
+
+  private terminateProcess(proc: ChildProcessWithoutNullStreams, reason: string) {
+    const pid = proc.pid
+    appLogger.info('Terminating FFmpeg process', { pid, reason })
+
+    if (!pid) {
+      proc.kill('SIGTERM')
+      return
+    }
+
+    const isWindows = process.platform === 'win32'
+    const killCommand = isWindows ? 'taskkill' : 'kill'
+    const killArgs = isWindows
+      ? ['/PID', pid.toString(), '/T', '/F']
+      : ['-TERM', pid.toString()]
+
+    const killProc = spawn(killCommand, killArgs)
+    killProc.on('close', (code) => {
+      if (code !== 0) {
+        appLogger.error('FFmpeg kill command failed, falling back to proc.kill', { pid, code, reason })
+        proc.kill('SIGTERM')
+      }
+    })
+    killProc.on('error', (error) => {
+      appLogger.error('FFmpeg kill command error, falling back to proc.kill', { pid, message: error.message, reason })
+      proc.kill('SIGTERM')
+    })
   }
 
   /**
@@ -163,35 +190,17 @@ export class FFmpegExecutor {
     // 应用资源限制
     const finalArgs = this.applyResourceLimits(args, options)
     const commandLine = this.formatCommandLine(finalArgs)
-    console.log(`[FFmpegExecutor] 执行命令: ${commandLine}`)
     appLogger.info('FFmpeg command', { command: commandLine })
     
-    // 根据平台和优先级选择执行方式
-    let proc: ChildProcessWithoutNullStreams
-    
-    if (options.priority && process.platform === 'win32') {
-      // Windows系统使用start命令设置优先级
-      const priorityClass = this.getWindowsPriorityClass(options.priority)
-      proc = spawn('cmd', ['/c', 'start', priorityClass, '/B', this.ffmpegPath, ...finalArgs])
-    } else if (options.priority && process.platform !== 'win32') {
-      // Unix系统使用nice命令设置优先级
-      const niceValue = this.getUnixNiceValue(options.priority)
-      proc = spawn('nice', ['-n', String(niceValue), this.ffmpegPath, ...finalArgs])
-    } else {
-      // 默认执行方式
-      proc = spawn(this.ffmpegPath, finalArgs)
-    }
+    // 直接 spawn ffmpeg，确保 task.cancel() 追踪到真实进程 PID。
+    const proc = spawn(this.ffmpegPath, finalArgs, { windowsHide: true })
     
     // 记录进程ID
     if (proc.pid) {
-      this.currentPid = proc.pid
-      console.log(`[FFmpegExecutor] FFmpeg process started with PID: ${proc.pid}`)
       appLogger.info('FFmpeg process started', {
         pid: proc.pid,
         args: finalArgs,
-        ffmpegPath: this.ffmpegPath
-      })
-      console.log(`[FFmpegExecutor] Applied resource limits:`, {
+        ffmpegPath: this.ffmpegPath,
         maxThreads: options.maxThreads ?? 'auto',
         priority: options.priority ?? 'normal',
         memoryLimit: options.memoryLimit ?? 'none'
@@ -206,27 +215,7 @@ export class FFmpegExecutor {
     // 设置超时机制
     if (options.timeout && options.timeout > 0) {
       timeoutId = setTimeout(() => {
-        console.warn(`[FFmpegExecutor] Process timeout after ${options.timeout}ms, terminating...`)
-        this.currentPid = undefined
-        
-        // 强制终止进程
-        if (proc.pid) {
-          const isWindows = process.platform === "win32"
-          const killCommand = isWindows ? "taskkill" : "kill"
-          const killArgs = isWindows 
-            ? ["/PID", proc.pid.toString(), "/F"]
-            : ["-9", proc.pid.toString()]
-          
-          const killProc = spawn(killCommand, killArgs)
-          killProc.on("close", () => {
-            proc.kill("SIGTERM")
-          })
-          killProc.on("error", () => {
-            proc.kill("SIGTERM")
-          })
-        } else {
-          proc.kill("SIGTERM")
-        }
+        this.terminateProcess(proc, `timeout:${options.timeout}`)
       }, options.timeout)
     }
 
@@ -266,11 +255,7 @@ export class FFmpegExecutor {
           timeoutId = null
         }
         
-        // 清除进程ID记录
-        this.currentPid = undefined
-        
         // 输出结束信息
-        console.log(`[FFmpegExecutor] 执行结束: code=${code}, signal=${signal ?? 'none'}, success=${code === 0}`)
         appLogger.info('FFmpeg execution finished', {
           code,
           signal,
@@ -280,11 +265,8 @@ export class FFmpegExecutor {
         })
         
         if (code !== 0) {
-          console.error(`[FFmpegExecutor] FFmpeg process failed with exit code: ${code}`)
-          
           // 分析错误原因
           errorReason = this.analyzeFFmpegError(stderr)
-          console.error(`[FFmpegExecutor] Error reason: ${errorReason}`)
           appLogger.error('FFmpeg process failed', {
             code,
             signal,
@@ -292,16 +274,7 @@ export class FFmpegExecutor {
             stderrTail: stderr.split('\n').filter(line => line.trim()).slice(-5)
           })
           
-          // 输出错误信息的最后几行
-          const stderrLines = stderr.split('\n').filter(line => line.trim())
-          if (stderrLines.length > 0) {
-            console.error(`[FFmpegExecutor] Last error lines:`)
-            stderrLines.slice(-5).forEach(line => {
-              console.error(`[FFmpegExecutor]   ${line}`)
-            })
-          }
         } else {
-          console.log(`[FFmpegExecutor] FFmpeg process completed successfully`)
           appLogger.info('FFmpeg process completed successfully', { code, signal })
         }
         
@@ -323,17 +296,16 @@ export class FFmpegExecutor {
           timeoutId = null
         }
         
-        console.error(`[FFmpegExecutor] Process error: ${err.message}`)
         appLogger.error('FFmpeg process error', { message: err.message })
         
         // 检查是否为 NodeJS 系统错误
         if (err instanceof Error) {
           const nodeError = err as NodeJS.ErrnoException
           if (nodeError.code) {
-            console.error(`[FFmpegExecutor] Error code: ${nodeError.code}`)
+            appLogger.error('FFmpeg process system error code', { code: nodeError.code })
           }
           if (nodeError.path) {
-            console.error(`[FFmpegExecutor] Error path: ${nodeError.path}`)
+            appLogger.error('FFmpeg process system error path', { path: nodeError.path })
           }
         }
         
@@ -345,40 +317,7 @@ export class FFmpegExecutor {
     return {
       process: proc,
       cancel: () => {
-        console.log(`[FFmpegExecutor] Cancelling FFmpeg process (PID: ${this.currentPid})`)
-        
-        if (!this.currentPid) {
-          console.warn(`[FFmpegExecutor] No process ID recorded, falling back to proc.kill()`)
-          proc.kill("SIGTERM")
-          return
-        }
-
-        // 根据平台选择适当的kill命令
-        const isWindows = process.platform === "win32"
-        const killCommand = isWindows ? "taskkill" : "kill"
-        const killArgs = isWindows 
-          ? ["/PID", this.currentPid.toString(), "/F"]
-          : ["-9", this.currentPid.toString()]
-
-        console.log(`[FFmpegExecutor] Executing: ${killCommand} ${killArgs.join(" ")}`)
-
-        const killProc = spawn(killCommand, killArgs)
-        
-        killProc.on("close", (code) => {
-          if (code === 0) {
-            console.log(`[FFmpegExecutor] Successfully terminated process ${this.currentPid}`)
-          } else {
-            console.warn(`[FFmpegExecutor] kill command exited with code ${code}, falling back to proc.kill()`)
-            proc.kill("SIGTERM")
-          }
-          this.currentPid = undefined
-        })
-
-        killProc.on("error", (err) => {
-          console.error(`[FFmpegExecutor] kill command error: ${err.message}, falling back to proc.kill()`)
-          proc.kill("SIGTERM")
-          this.currentPid = undefined
-        })
+        this.terminateProcess(proc, 'cancel')
       },
       result
     }

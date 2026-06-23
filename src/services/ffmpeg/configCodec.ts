@@ -110,6 +110,62 @@ export function updateFfmpegConfigOnElement(moddle: any, businessObject: any, co
 
 }
 
+interface BpmnModelerLike {
+  get: (name: string) => unknown
+}
+
+export function persistFfmpegConfigToModel(
+  modeler: BpmnModelerLike,
+  elementId: string,
+  config: FfmpegJobConfig
+): boolean {
+  try {
+    const elementRegistry = modeler.get('elementRegistry') as {
+      get: (id: string) => { businessObject: unknown } | undefined
+    }
+    const modeling = modeler.get('modeling') as {
+      updateProperties: (element: unknown, props: Record<string, unknown>) => void
+    }
+    const moddle = modeler.get('moddle')
+
+    const element = elementRegistry.get(elementId)
+    if (!element) return false
+
+    const extensionElements = updateFfmpegConfigOnElement(moddle, element.businessObject, config)
+    modeling.updateProperties(element, { extensionElements })
+    return true
+  } catch (error) {
+    console.error('[FFmpeg] 写入节点配置失败:', error)
+    return false
+  }
+}
+
+export function readFfmpegConfigFromElement(
+  modeler: BpmnModelerLike | null | undefined,
+  elementId: string,
+  fallbackBusinessObject?: unknown
+): FfmpegJobConfig {
+  if (modeler) {
+    try {
+      const elementRegistry = modeler.get('elementRegistry') as {
+        get: (id: string) => { businessObject?: unknown } | undefined
+      }
+      const element = elementRegistry.get(elementId)
+      if (element?.businessObject) {
+        return readFfmpegConfigFromBusinessObject(element.businessObject)
+      }
+    } catch {
+      // 回退到传入的 businessObject
+    }
+  }
+
+  if (fallbackBusinessObject) {
+    return readFfmpegConfigFromBusinessObject(fallbackBusinessObject)
+  }
+
+  return { ...DEFAULT_FFMPEG_JOB_CONFIG }
+}
+
 
 
 function findFfmpegConfigElement(serviceTaskElement: Element): Element | null {

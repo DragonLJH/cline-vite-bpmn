@@ -1,4 +1,10 @@
 export {
+  DEFAULT_VIDEO_CODEC,
+  resolveVideoCodec,
+  supportsX264Preset
+} from './codecResolver'
+
+export {
   DEFAULT_FFMPEG_JOB_CONFIG,
   FFMPEG_ACTION_LABELS,
   getJobOutputFormat,
@@ -10,7 +16,7 @@ export {
   resolveFilterImage,
   resolveJobInput,
   serializeFfmpegJobConfig
-} from '../../src/shared/ffmpeg'
+} from './jobConfig'
 
 export type {
   FfmpegDrawtextFilter,
@@ -25,4 +31,10 @@ export type {
   FfmpegJobVideo,
   FfmpegOverlayFilter,
   LegacyFfmpegTaskConfig
-} from '../../src/shared/ffmpeg'
+} from './jobConfig'
+
+export {
+  buildJobCommand,
+  formatFfmpegCommandPreview,
+  previewJobCommand
+} from './jobCommandBuilder'

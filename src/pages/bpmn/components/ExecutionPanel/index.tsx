@@ -146,15 +146,20 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ className }) => {
       const storeState = useStore.getState() as {
         modelerRef?: { saveXML: (options: { format: boolean }) => Promise<{ xml?: string }> }
         setBpmnXml?: (xml: string) => void
+        setBpmnXmlFromModeler?: (xml: string) => void
         getPendingFfmpegConfigs?: () => Record<string, FfmpegJobConfig>
       }
-      const { modelerRef, setBpmnXml, getPendingFfmpegConfigs } = storeState
+      const { modelerRef, setBpmnXml, setBpmnXmlFromModeler, getPendingFfmpegConfigs } = storeState
       if (modelerRef) {
         try {
           const { xml } = await modelerRef.saveXML({ format: true })
           if (xml) {
             xmlToRun = xml
-            setBpmnXml?.(xml)
+            if (setBpmnXmlFromModeler) {
+              setBpmnXmlFromModeler(xml)
+            } else {
+              setBpmnXml?.(xml)
+            }
           }
         } catch {
           // 使用 store 中已有 XML

@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 
 import { useFfmpegBpmnStore } from '../../../../stores/ffmpegBpmnStore'
 
-import type { FfmpegJobAction, FfmpegJobConfig, FfmpegDrawtextFilter, FfmpegOverlayFilter } from '../../../../types/bpmn'
+import type { FfmpegJobAction, FfmpegJobConfig, FfmpegJobFilter, FfmpegDrawtextFilter, FfmpegOverlayFilter, BpmnElement } from '../../../../types/bpmn'
 
 import {
 
@@ -10,9 +10,9 @@ import {
 
   FFMPEG_OPERATION_LABELS,
 
-  readFfmpegConfigFromBusinessObject,
+  readFfmpegConfigFromElement,
 
-  updateFfmpegConfigOnElement
+  persistFfmpegConfigToModel
 
 } from '../../../../services/ffmpeg/configCodec'
 
@@ -72,6 +72,26 @@ const INPUT_SOURCES = [
 
 ]
 
+function restoreCanvasSelection(elementId: string | null) {
+  const modeler = useFfmpegBpmnStore.getState().modelerRef
+  if (!modeler) return
+
+  try {
+    const selection = modeler.get('selection') as { select: (elements: unknown[]) => void }
+    if (!elementId) {
+      selection.select([])
+      return
+    }
+    const elementRegistry = modeler.get('elementRegistry') as {
+      get: (id: string) => unknown
+    }
+    const element = elementRegistry.get(elementId)
+    if (element) selection.select([element])
+  } catch (error) {
+    console.warn('恢复画布选中失败:', error)
+  }
+}
+
 
 
 const FfmpegPropertiesPanel: React.FC = () => {
@@ -91,10 +111,17 @@ const FfmpegPropertiesPanel: React.FC = () => {
   const [ffmpegConfig, setFfmpegConfig] = useState<FfmpegJobConfig>({ ...DEFAULT_FFMPEG_CONFIG })
 
   const [hasChanges, setHasChanges] = useState(false)
+  const [commandPreview, setCommandPreview] = useState('')
 
   const [selectedFilterIndex, setSelectedFilterIndex] = useState<number | null>(null)
 
   const filterCardRefs = useRef<Record<number, HTMLDivElement | null>>({})
+
+  const loadedElementIdRef = useRef<string | null>(null)
+  const prevSelectedElementRef = useRef<BpmnElement | null>(null)
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+  const [pendingElement, setPendingElement] = useState<BpmnElement | null>(null)
+  const [pendingDeselect, setPendingDeselect] = useState(false)
 
 
 
@@ -109,6 +136,33 @@ const FfmpegPropertiesPanel: React.FC = () => {
   const filterTimeMax = ffmpegConfig.action === 'trim'
     ? parseTimeToSeconds(ffmpegConfig.trim?.duration)
     : mediaDuration
+
+  useEffect(() => {
+    if (!isServiceTask) {
+      setCommandPreview('')
+      return
+    }
+
+    let cancelled = false
+    const localPreview = previewJobCommand(ffmpegConfig)
+    setCommandPreview(localPreview)
+
+    const loadPreview = async () => {
+      const result = await window.electronAPI?.ffmpeg.previewJobCommand?.({
+        config: ffmpegConfig,
+        inputPath: previewContext.inputPath || undefined,
+        overlayImages: (ffmpegConfig.filters || [])
+          .filter((filter): filter is Extract<FfmpegJobFilter, { type: 'overlay' }> => filter.type === 'overlay')
+          .map(filter => filter.image)
+      })
+      if (!cancelled && result?.success && result.command) {
+        setCommandPreview(result.command)
+      }
+    }
+
+    loadPreview()
+    return () => { cancelled = true }
+  }, [ffmpegConfig, isServiceTask, previewContext.inputPath])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -174,10 +228,11 @@ const FfmpegPropertiesPanel: React.FC = () => {
     if (element.type === 'bpmn:ServiceTask') {
 
       const pending = useFfmpegBpmnStore.getState().pendingFfmpegConfigs[element.id]
+      const modeler = useFfmpegBpmnStore.getState().modelerRef
 
       setFfmpegConfig(
 
-        pending || readFfmpegConfigFromBusinessObject(element.businessObject)
+        pending || readFfmpegConfigFromElement(modeler, element.id, element.businessObject)
 
       )
 
@@ -195,7 +250,63 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
   useEffect(() => {
 
-    loadElementData(selectedElement)
+    if (selectedElement) {
+
+      const prevElement = prevSelectedElementRef.current
+
+      const isElementSwitch = prevElement && prevElement.id !== selectedElement.id
+
+      if (hasChanges && isElementSwitch) {
+
+        setPendingElement(selectedElement)
+
+        setPendingDeselect(false)
+
+        setShowConfirmDialog(true)
+
+        restoreCanvasSelection(prevElement.id)
+
+        useFfmpegBpmnStore.getState().setSelectedElement(prevElement)
+
+        return
+
+      }
+
+      if (loadedElementIdRef.current !== selectedElement.id) {
+
+        loadedElementIdRef.current = selectedElement.id
+
+        loadElementData(selectedElement)
+
+      }
+
+      prevSelectedElementRef.current = selectedElement
+
+      return
+
+    }
+
+    const prevElement = prevSelectedElementRef.current
+
+    if (hasChanges && prevElement) {
+
+      setPendingElement(null)
+
+      setPendingDeselect(true)
+
+      setShowConfirmDialog(true)
+
+      restoreCanvasSelection(prevElement.id)
+
+      useFfmpegBpmnStore.getState().setSelectedElement(prevElement)
+
+      return
+
+    }
+
+    loadedElementIdRef.current = null
+
+    prevSelectedElementRef.current = null
 
   }, [selectedElement, loadElementData])
 
@@ -502,11 +613,11 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
 
 
-  const handleSave = async () => {
+  const handleSave = async (): Promise<boolean> => {
 
     const modeler = useFfmpegBpmnStore.getState().modelerRef
 
-    if (!modeler || !selectedElement) return
+    if (!modeler || !selectedElement) return false
 
 
 
@@ -516,11 +627,9 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
       const modeling = modeler.get('modeling')
 
-      const moddle = modeler.get('moddle')
-
       const element = elementRegistry.get(selectedElement.id)
 
-      if (!element) return
+      if (!element) return false
 
 
 
@@ -550,17 +659,15 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
       if (isServiceTask) {
 
-        const extensionElements = updateFfmpegConfigOnElement(
+        const targetId = elementId || selectedElement.id
 
-          moddle,
+        if (!persistFfmpegConfigToModel(modeler, targetId, ffmpegConfig)) {
 
-          element.businessObject,
+          console.error('保存 FFmpeg 配置到节点失败')
 
-          ffmpegConfig
+          return false
 
-        )
-
-        modeling.updateModdleProperties(element, { extensionElements })
+        }
 
       }
 
@@ -570,7 +677,13 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
       setHasChanges(false)
 
-      useFfmpegBpmnStore.getState().clearPendingFfmpegConfig(elementId || selectedElement.id)
+      useFfmpegBpmnStore.getState().clearPendingFfmpegConfig(selectedElement.id)
+
+      if (elementId && elementId !== selectedElement.id) {
+
+        useFfmpegBpmnStore.getState().clearPendingFfmpegConfig(elementId)
+
+      }
 
       try {
 
@@ -578,7 +691,7 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
         if (xml) {
 
-          useFfmpegBpmnStore.getState().setBpmnXml(xml)
+          useFfmpegBpmnStore.getState().setBpmnXmlFromModeler(xml)
 
         }
 
@@ -594,6 +707,18 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
       if (updated) {
 
+        const savedConfig = readFfmpegConfigFromElement(
+
+          modeler,
+
+          updated.id,
+
+          updated.businessObject
+
+        )
+
+        setFfmpegConfig(savedConfig)
+
         useFfmpegBpmnStore.getState().setSelectedElement({
 
           id: updated.id,
@@ -608,11 +733,115 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
       }
 
+      return true
+
     } catch (error) {
 
       console.error('保存 FFmpeg 配置失败:', error)
 
+      return false
+
     }
+
+  }
+
+
+
+  const closeConfirmDialog = () => {
+
+    setShowConfirmDialog(false)
+
+    setPendingElement(null)
+
+    setPendingDeselect(false)
+
+  }
+
+
+
+  const applyPendingSelection = (target: BpmnElement | null) => {
+
+    if (target) {
+
+      loadedElementIdRef.current = target.id
+
+      loadElementData(target)
+
+      prevSelectedElementRef.current = target
+
+      useFfmpegBpmnStore.getState().setSelectedElement(target)
+
+      restoreCanvasSelection(target.id)
+
+      return
+
+    }
+
+    loadedElementIdRef.current = null
+
+    prevSelectedElementRef.current = null
+
+    useFfmpegBpmnStore.getState().setSelectedElement(null)
+
+    restoreCanvasSelection(null)
+
+  }
+
+
+
+  const handleConfirmCancel = () => {
+
+    closeConfirmDialog()
+
+  }
+
+
+
+  const handleConfirmDiscard = () => {
+
+    const prevId = prevSelectedElementRef.current?.id
+
+    if (prevId) {
+
+      useFfmpegBpmnStore.getState().clearPendingFfmpegConfig(prevId)
+
+    }
+
+    setHasChanges(false)
+
+    if (pendingDeselect) {
+
+      applyPendingSelection(null)
+
+    } else if (pendingElement) {
+
+      applyPendingSelection(pendingElement)
+
+    }
+
+    closeConfirmDialog()
+
+  }
+
+
+
+  const handleConfirmSave = async () => {
+
+    const saved = await handleSave()
+
+    if (!saved) return
+
+    if (pendingDeselect) {
+
+      applyPendingSelection(null)
+
+    } else if (pendingElement) {
+
+      applyPendingSelection(pendingElement)
+
+    }
+
+    closeConfirmDialog()
 
   }
 
@@ -1183,10 +1412,6 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
 
 
-  const commandPreview = isServiceTask ? previewJobCommand(ffmpegConfig) : ''
-
-
-
   return (
 
     <div className="ffmpeg-props">
@@ -1419,7 +1644,7 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
           className="ffmpeg-props__save"
 
-          onClick={handleSave}
+          onClick={() => void handleSave()}
 
           disabled={!hasChanges}
 
@@ -1430,6 +1655,88 @@ const FfmpegPropertiesPanel: React.FC = () => {
         </button>
 
       </div>
+
+
+
+      {showConfirmDialog && (
+
+        <div className="ffmpeg-props__modal-overlay" onClick={handleConfirmCancel}>
+
+          <div className="ffmpeg-props__modal" onClick={e => e.stopPropagation()}>
+
+            <div className="ffmpeg-props__modal-header">
+
+              <h4 className="ffmpeg-props__modal-title">未保存的修改</h4>
+
+            </div>
+
+            <div className="ffmpeg-props__modal-body">
+
+              <p className="ffmpeg-props__confirm-text">
+
+                当前节点有未保存的修改，是否保存后再切换？
+
+              </p>
+
+              <p className="ffmpeg-props__confirm-warning">
+
+                直接切换将丢失未保存的修改。
+
+              </p>
+
+            </div>
+
+            <div className="ffmpeg-props__modal-footer">
+
+              <button
+
+                type="button"
+
+                className="ffmpeg-props__modal-btn ffmpeg-props__modal-btn--cancel"
+
+                onClick={handleConfirmCancel}
+
+              >
+
+                取消
+
+              </button>
+
+              <button
+
+                type="button"
+
+                className="ffmpeg-props__modal-btn ffmpeg-props__modal-btn--discard"
+
+                onClick={handleConfirmDiscard}
+
+              >
+
+                放弃修改
+
+              </button>
+
+              <button
+
+                type="button"
+
+                className="ffmpeg-props__modal-btn ffmpeg-props__modal-btn--save"
+
+                onClick={() => void handleConfirmSave()}
+
+              >
+
+                保存并切换
+
+              </button>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      )}
 
     </div>
 

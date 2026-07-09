@@ -26,8 +26,15 @@ export interface FfmpegMediaInfo {
   raw?: string
 }
 
+export interface FfmpegProbePartialPayload {
+  taskId: string
+  inputPath: string
+  info: FfmpegMediaInfo
+}
+
 export interface FfmpegProbeRequest {
   inputPath: string
+  taskId?: string
 }
 
 export interface FfmpegProbeResult {
@@ -142,4 +149,5 @@ export interface FfmpegApi {
   snapshot: (payload: FfmpegSnapshotRequest) => Promise<FfmpegSnapshotResult>
   readPreviewAsDataUrl: (payload: FfmpegReadPreviewAsDataUrlRequest) => Promise<FfmpegReadPreviewAsDataUrlResult>
   onProgress: (callback: (data: FfmpegProgressPayload) => void) => () => void
+  onProbePartial: (callback: (data: FfmpegProbePartialPayload) => void) => () => void
 }

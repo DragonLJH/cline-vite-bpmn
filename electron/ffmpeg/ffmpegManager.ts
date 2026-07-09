@@ -1,7 +1,7 @@
 import { videoService } from "../services/videoService"
 import { FFmpegProgress } from "../ffmpeg/progressParser"
 import type { FFmpegResult, FFmpegTask } from "../ffmpeg/FFmpegExecutor"
-import { probeMedia, runFfmpegTask, type FfmpegProbeResult } from "./ffmpegRunner"
+import { probeMedia, runFfmpegTask, type FfmpegProbeResult, type MediaInfo } from "./ffmpegRunner"
 import { buildJobCommand, formatFfmpegCommandPreview } from "./jobCommandBuilder"
 import type { FfmpegJobConfig } from "./jobConfig"
 import { getJobOutputFormat, parseTrimDuration } from "./jobConfig"
@@ -61,8 +61,11 @@ class FfmpegManager {
   /**
    * 探测媒体信息（BPMN 工作流 probe 步骤）
    */
-  async probe(inputPath: string): Promise<FfmpegProbeResult> {
-    return probeMedia(inputPath)
+  async probe(
+    inputPath: string,
+    options?: { onPartial?: (info: MediaInfo) => void }
+  ): Promise<FfmpegProbeResult> {
+    return probeMedia(inputPath, options)
   }
 
   /**

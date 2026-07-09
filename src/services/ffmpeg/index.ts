@@ -25,7 +25,10 @@ export type {
   FfmpegDrawtextFilter,
   FfmpegOverlayFilter,
   FfmpegJobGlobal,
-  FfmpegJobTrim
+  FfmpegJobTrim,
+  FfmpegJobCrop,
+  FfmpegJobCropAdvanced,
+  FfmpegJobCropKeyframe
 } from './jobConfig'
 
 export { buildJobCommand, previewJobCommand, formatFfmpegCommandPreview } from './jobCommandBuilder'

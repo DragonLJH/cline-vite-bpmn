@@ -59,6 +59,38 @@ export function scalePreviewSize(
   return (realSize / realW) * previewW
 }
 
+export function realRectToPreview(
+  rect: Rect,
+  previewW: number,
+  previewH: number,
+  realW: number,
+  realH: number
+): Rect {
+  const pos = realToPreview(rect.x, rect.y, previewW, previewH, realW, realH)
+  return {
+    x: pos.x,
+    y: pos.y,
+    width: scalePreviewSize(rect.width, previewW, realW),
+    height: scalePreviewSize(rect.height, previewH, realH)
+  }
+}
+
+export function previewRectToReal(
+  rect: Rect,
+  previewW: number,
+  previewH: number,
+  realW: number,
+  realH: number
+): Rect {
+  const pos = previewToReal(rect.x, rect.y, previewW, previewH, realW, realH)
+  return {
+    x: pos.x,
+    y: pos.y,
+    width: Math.round((rect.width / previewW) * realW),
+    height: Math.round((rect.height / previewH) * realH)
+  }
+}
+
 export function buildCanvasGuides(previewW: number, previewH: number): SnapGuide[] {
   return [
     { x: 0, label: 'left' },

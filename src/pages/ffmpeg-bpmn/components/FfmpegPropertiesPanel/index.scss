@@ -31,6 +31,33 @@
     gap: 8px;
   }
 
+  &__crop-keyframe-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+
+    button {
+      padding: 6px 10px;
+      border: none;
+      border-radius: 6px;
+      background: #2563eb;
+      color: #fff;
+      font-size: 12px;
+      cursor: pointer;
+
+      &:hover {
+        background: #1d4ed8;
+      }
+    }
+
+    span {
+      color: #6b7280;
+      font-size: 11px;
+    }
+  }
+
   &__inline-inputs {
     display: flex;
     gap: 8px;
@@ -269,97 +296,6 @@
     margin: 6px 0 0;
     font-size: 11px;
     color: #9ca3af;
-  }
-
-  &__timeline {
-    margin-bottom: 12px;
-
-    &--disabled {
-      opacity: 0.55;
-      pointer-events: none;
-    }
-
-    &--estimated {
-      .ffmpeg-props__timeline-track {
-        border: 1px dashed #f59e0b;
-      }
-    }
-  }
-
-  &__timeline-note {
-    margin: 4px 0 0;
-    font-size: 11px;
-    color: #b45309;
-  }
-
-  &__timeline-track {
-    position: relative;
-    height: 28px;
-    border-radius: 4px;
-    background: #e5e7eb;
-    cursor: pointer;
-    touch-action: none;
-  }
-
-  &__timeline-range {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    background: rgba(37, 99, 235, 0.35);
-    border-radius: 2px;
-  }
-
-  &__timeline-handle {
-    position: absolute;
-    top: 50%;
-    width: 12px;
-    height: 20px;
-    margin-left: -6px;
-    transform: translateY(-50%);
-    background: #2563eb;
-    border-radius: 3px;
-    cursor: ew-resize;
-    z-index: 2;
-  }
-
-  &__timeline-playhead {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 8px;
-    margin-left: -4px;
-    background: transparent;
-    cursor: pointer;
-    z-index: 1;
-
-    &::after {
-      content: '';
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      left: 3px;
-      width: 2px;
-      background: #f59e0b;
-    }
-  }
-
-  &__timeline-labels,
-  &__timeline-inputs {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    margin-top: 6px;
-    font-size: 11px;
-    color: #6b7280;
-  }
-
-  &__timeline-inputs {
-    margin-top: 10px;
-
-    .ffmpeg-props__field {
-      flex: 1;
-      margin-bottom: 0;
-    }
   }
 
   &__canvas {

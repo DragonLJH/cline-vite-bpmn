@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
-import type { FfmpegApi, FfmpegProgressPayload } from '../src/shared/electron/ffmpegApi'
+import type { FfmpegApi, FfmpegProgressPayload, FfmpegProbePartialPayload } from '../src/shared/electron/ffmpegApi'
 
 // 自定义 API 接口定义
 interface ElectronAPI {
@@ -51,7 +51,7 @@ interface ElectronAPI {
   once: (channel: string, callback: (...args: unknown[]) => void) => void
 }
 
-const EVENT_CHANNELS = ['window:maximized', 'window:unmaximized', 'theme:changed', 'ffmpeg:progress']
+const EVENT_CHANNELS = ['window:maximized', 'window:unmaximized', 'theme:changed', 'ffmpeg:progress', 'ffmpeg:probePartial']
 
 const electronAPI: ElectronAPI = {
   platform: process.platform,
@@ -99,6 +99,11 @@ const electronAPI: ElectronAPI = {
       const handler = (_event: IpcRendererEvent, data: FfmpegProgressPayload) => callback(data)
       ipcRenderer.on('ffmpeg:progress', handler)
       return () => ipcRenderer.removeListener('ffmpeg:progress', handler)
+    },
+    onProbePartial: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: FfmpegProbePartialPayload) => callback(data)
+      ipcRenderer.on('ffmpeg:probePartial', handler)
+      return () => ipcRenderer.removeListener('ffmpeg:probePartial', handler)
     }
   },
   on: (channel: string, callback: (...args: unknown[]) => void) => {

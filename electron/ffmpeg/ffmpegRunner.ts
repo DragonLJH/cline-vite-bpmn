@@ -21,6 +21,11 @@ export interface FfmpegRunOptions {
   priority?: 'low' | 'normal' | 'high'
   memoryLimit?: string
   onProgress?: (data: { taskId?: string; progress: FFmpegProgress }) => void
+  onLog?: (line: string) => void
+}
+
+export interface ProbeMediaOptions {
+  onPartial?: (info: MediaInfo) => void
 }
 
 export interface FfmpegRunResult {
@@ -54,7 +59,8 @@ function toExecutorOptions(options?: FfmpegRunOptions): ExecutorOptions {
     memoryLimit: options.memoryLimit,
     onProgress: options.onProgress
       ? (progress) => options.onProgress!({ taskId: options.taskId, progress })
-      : undefined
+      : undefined,
+    onLog: options.onLog
   }
 }
 
@@ -96,7 +102,10 @@ export function runFfmpegTask(args: string[], options?: FfmpegRunOptions): FFmpe
   return ffmpegExecutor.run(args, toExecutorOptions(options))
 }
 
-export async function probeMedia(inputPath: string): Promise<FfmpegProbeResult> {
+export async function probeMedia(
+  inputPath: string,
+  options?: ProbeMediaOptions
+): Promise<FfmpegProbeResult> {
   try {
     const config: FfmpegJobConfig = {
       type: 'ffmpeg',
@@ -104,12 +113,30 @@ export async function probeMedia(inputPath: string): Promise<FfmpegProbeResult> 
       global: { hideBanner: true, noStdin: true }
     }
     const args = buildJobCommand(config, inputPath)
-    const result = await runFfmpeg(args, { timeout: 15000 })
-    const detailedInfo = videoService.parseMediaInfo(result.stderr)
+    let accumulated = ''
+
+    const emitPartial = () => {
+      if (!accumulated.trim() || !options?.onPartial) return
+      options.onPartial({
+        ...parseFlatMediaInfo(accumulated),
+        raw: accumulated
+      })
+    }
+
+    const result = await runFfmpeg(args, {
+      timeout: 15000,
+      onLog: (line) => {
+        accumulated += line
+        emitPartial()
+      }
+    })
+
+    const stderr = result.stderr || accumulated
+    const detailedInfo = videoService.parseMediaInfo(stderr)
 
     return {
       success: result.success,
-      info: toFlatMediaInfo(detailedInfo, result.stderr),
+      info: toFlatMediaInfo(detailedInfo, stderr),
       detailedInfo,
       code: result.code
     }

@@ -29,12 +29,20 @@ import {
 } from '../../../../services/ffmpeg/types'
 
 import { parseTimeToSeconds } from '../../../../services/ffmpeg/timeUtils'
+import {
+  findKeyframeIndexAtTime,
+  resolveCropAtTime,
+  sortCropKeyframes
+} from '../../../../shared/ffmpeg/cropKeyframes'
+import type { FfmpegJobCropKeyframe } from '../../../../types/bpmn'
 
 import { toLocalMediaUrl } from '../../../../services/ffmpeg/coordinateUtils'
 
 import Icon from '../../../../components/Icon'
 
-import TrimTimeline from './TrimTimeline'
+import TrimTimeline from '../../../../components/ffmpeg/TrimTimeline'
+import SeekTimeline from '../../../../components/ffmpeg/SeekTimeline'
+import CropCanvas from '../../../../components/ffmpeg/CropCanvas'
 
 import PreviewSourceBar from './preview/PreviewSourceBar'
 
@@ -51,6 +59,8 @@ const ACTIONS: FfmpegJobAction[] = [
   'probe',
 
   'trim',
+
+  'crop',
 
   'transcode',
 
@@ -215,6 +225,21 @@ const FfmpegPropertiesPanel: React.FC = () => {
     return () => { cancelled = true }
   }, [previewContext.inputPath, previewContext.mediaInfo, previewAvailable])
 
+  useEffect(() => {
+    if (ffmpegConfig.action !== 'crop' || !previewContext.mediaInfo || ffmpegConfig.crop) return
+    const width = previewContext.mediaInfo.width || 1920
+    const height = previewContext.mediaInfo.height || 1080
+    setFfmpegConfig(prev => ({
+      ...prev,
+      crop: { x: 0, y: 0, width, height },
+      cropAdvanced: {
+        ...prev.cropAdvanced,
+        durationSeconds: previewContext.mediaInfo?.durationSeconds
+          || parseTimeToSeconds(previewContext.mediaInfo?.duration)
+      }
+    }))
+  }, [ffmpegConfig.action, ffmpegConfig.crop, previewContext.mediaInfo])
+
 
 
   const loadElementData = useCallback((element: typeof selectedElement) => {
@@ -340,6 +365,13 @@ const FfmpegPropertiesPanel: React.FC = () => {
         next.filters = prev.filters?.length ? [...prev.filters] : []
         delete next.video
         delete next.audio
+      } else if (action === 'crop') {
+        delete next.filters
+        delete next.trim
+        next.crop = prev.crop || { x: 0, y: 0, width: 1920, height: 1080 }
+        next.cropAdvanced = prev.cropAdvanced || { mode: 'static', keyframes: [], interp: 'step' }
+        next.video = { codec: 'libopenh264' }
+        next.audio = { codec: 'copy' }
       } else if (action === 'transcode') {
         delete next.filters
         next.video = { codec: 'libopenh264', preset: 'medium' }
@@ -424,6 +456,38 @@ const FfmpegPropertiesPanel: React.FC = () => {
       ...prev,
 
       trim: { ...prev.trim, ...patch }
+
+    }))
+
+    setHasChanges(true)
+
+  }
+
+
+
+  const updateCrop = (patch: Partial<NonNullable<FfmpegJobConfig['crop']>>) => {
+
+    setFfmpegConfig(prev => ({
+
+      ...prev,
+
+      crop: { ...(prev.crop || { x: 0, y: 0, width: 1920, height: 1080 }), ...patch }
+
+    }))
+
+    setHasChanges(true)
+
+  }
+
+
+
+  const updateCropAdvanced = (patch: Partial<NonNullable<FfmpegJobConfig['cropAdvanced']>>) => {
+
+    setFfmpegConfig(prev => ({
+
+      ...prev,
+
+      cropAdvanced: { ...prev.cropAdvanced, ...patch }
 
     }))
 
@@ -938,6 +1002,170 @@ const FfmpegPropertiesPanel: React.FC = () => {
           </>
 
         )
+
+      case 'crop': {
+        const cropRealW = previewContext.mediaInfo?.width || 1920
+        const cropRealH = previewContext.mediaInfo?.height || 1080
+        const cropRegion = ffmpegConfig.crop || { x: 0, y: 0, width: cropRealW, height: cropRealH }
+        const cropVideoSrc = previewContext.inputPath ? toLocalMediaUrl(previewContext.inputPath) : null
+        const cropPreviewImage = previewContext.previewMode === 'snapshot'
+          ? previewContext.previewFrameDataUrl
+          : null
+        const previewTime = previewContext.previewFrameTime ?? 0
+        const isKeyframeMode = ffmpegConfig.cropAdvanced?.mode === 'keyframes'
+        const cropKeyframeTimes = sortCropKeyframes(ffmpegConfig.cropAdvanced?.keyframes || []).map(item => item.time)
+        const cropDisplayRegion = isKeyframeMode
+          ? resolveCropAtTime(ffmpegConfig.cropAdvanced?.keyframes, previewTime, cropRegion, mediaDuration)
+          : cropRegion
+
+        const handleCropRegionChange = (patch: Partial<typeof cropRegion>) => {
+          if (isKeyframeMode) {
+            setFfmpegConfig(prev => {
+              const keyframes = [...(prev.cropAdvanced?.keyframes || [])]
+              const base = resolveCropAtTime(keyframes, previewTime, prev.crop || cropRegion, mediaDuration)
+              const nextKeyframe: FfmpegJobCropKeyframe = { time: previewTime, ...base, ...patch }
+              const index = findKeyframeIndexAtTime(keyframes, previewTime)
+              if (index >= 0) keyframes[index] = nextKeyframe
+              else keyframes.push(nextKeyframe)
+              return {
+                ...prev,
+                cropAdvanced: {
+                  ...prev.cropAdvanced,
+                  mode: 'keyframes',
+                  interp: 'step',
+                  durationSeconds: mediaDuration,
+                  keyframes: sortCropKeyframes(keyframes)
+                }
+              }
+            })
+            setHasChanges(true)
+            return
+          }
+          updateCrop(patch)
+        }
+
+        return (
+          <>
+            {!previewContext.inputPath && previewAvailable && (
+              <p className="ffmpeg-props__hint">请先在执行面板选择视频，以获取分辨率并启用画面裁剪预览。</p>
+            )}
+            {previewContext.inputPath && !previewContext.mediaInfo && (
+              <p className="ffmpeg-props__hint">正在探测视频分辨率…若失败则暂用默认 1920×1080 刻度。</p>
+            )}
+            {previewContext.inputPath && (
+              <label className="ffmpeg-props__field ffmpeg-props__field--row">
+                <input
+                  type="checkbox"
+                  checked={isKeyframeMode}
+                  onChange={e => {
+                    if (e.target.checked) {
+                      updateCropAdvanced({
+                        mode: 'keyframes',
+                        interp: 'step',
+                        durationSeconds: mediaDuration,
+                        keyframes: [{ time: 0, ...cropRegion }]
+                      })
+                    } else {
+                      updateCropAdvanced({ mode: 'static', keyframes: [] })
+                    }
+                  }}
+                />
+                <span>高级模式（关键帧分段裁剪）</span>
+              </label>
+            )}
+            {previewContext.inputPath && isKeyframeMode && (
+              <div className="ffmpeg-props__crop-keyframe-actions">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const keyframes = [...(ffmpegConfig.cropAdvanced?.keyframes || [])]
+                    if (findKeyframeIndexAtTime(keyframes, previewTime) >= 0) return
+                    keyframes.push({ time: previewTime, ...cropDisplayRegion })
+                    updateCropAdvanced({
+                      mode: 'keyframes',
+                      interp: 'step',
+                      durationSeconds: mediaDuration,
+                      keyframes: sortCropKeyframes(keyframes)
+                    })
+                  }}
+                >
+                  添加关键帧
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateCropAdvanced({
+                      keyframes: (ffmpegConfig.cropAdvanced?.keyframes || []).filter(
+                        item => Math.abs(item.time - previewTime) > 0.05
+                      )
+                    })
+                  }}
+                >
+                  删除当前关键帧
+                </button>
+                <span>{cropKeyframeTimes.length} 个关键帧</span>
+              </div>
+            )}
+            {previewContext.inputPath && (
+              <SeekTimeline
+                durationSeconds={mediaDuration}
+                currentSeconds={previewTime}
+                onSeek={seconds => {
+                  if (previewAvailable) void refreshPreview(seconds)
+                }}
+                keyframeTimes={isKeyframeMode ? cropKeyframeTimes : undefined}
+                onKeyframeSelect={seconds => {
+                  if (previewAvailable) void refreshPreview(seconds)
+                }}
+                disabled={!previewContext.inputPath || !previewAvailable}
+                durationEstimated={!previewContext.mediaInfo}
+                loading={previewContext.previewLoading}
+              />
+            )}
+            {(cropPreviewImage || cropVideoSrc) && (
+              <CropCanvas
+                videoSrc={cropPreviewImage ? null : cropVideoSrc}
+                previewImageUrl={cropPreviewImage}
+                realW={cropRealW}
+                realH={cropRealH}
+                crop={cropDisplayRegion}
+                onChange={handleCropRegionChange}
+                disabled={!previewContext.inputPath || !previewAvailable}
+                resolutionEstimated={!previewContext.mediaInfo}
+                previewLoading={previewContext.previewLoading}
+              />
+            )}
+            <label className="ffmpeg-props__field">
+              <span>视频编码</span>
+              <select
+                value={String(ffmpegConfig.video?.codec ?? 'libopenh264')}
+                onChange={e => updateVideo({ codec: e.target.value })}
+              >
+                {VIDEO_CODEC_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="ffmpeg-props__field">
+              <span>音频编码</span>
+              <select
+                value={String(ffmpegConfig.audio?.codec ?? 'copy')}
+                onChange={e => updateAudio({ codec: e.target.value })}
+              >
+                {AUDIO_CODEC_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            <p className="ffmpeg-props__hint">
+              {isKeyframeMode
+                ? '高级模式：相邻关键帧之间按阶跃方式应用不同裁剪区域；时间轴用于预览与打点。'
+                : '简单模式：全片使用同一裁剪区域；时间轴仅用于选择预览帧。'}
+              执行时需重编码，不支持流复制。
+            </p>
+          </>
+        )
+      }
 
       case 'transcode':
 

@@ -3,6 +3,7 @@ import { DEFAULT_VIDEO_CODEC, resolveVideoCodec } from './codecResolver'
 export type FfmpegJobAction =
   | 'probe'
   | 'trim'
+  | 'crop'
   | 'transcode'
   | 'watermark'
   | 'extractAudio'
@@ -71,6 +72,24 @@ export interface FfmpegJobTrim {
   precise?: boolean
 }
 
+export interface FfmpegJobCrop {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface FfmpegJobCropKeyframe extends FfmpegJobCrop {
+  time: number
+}
+
+export interface FfmpegJobCropAdvanced {
+  mode?: 'static' | 'keyframes'
+  keyframes?: FfmpegJobCropKeyframe[]
+  interp?: 'step'
+  durationSeconds?: number
+}
+
 export interface FfmpegJobConfig {
   type: 'ffmpeg'
   action: FfmpegJobAction
@@ -81,6 +100,8 @@ export interface FfmpegJobConfig {
   filters?: FfmpegJobFilter[]
   global?: FfmpegJobGlobal
   trim?: FfmpegJobTrim
+  crop?: FfmpegJobCrop
+  cropAdvanced?: FfmpegJobCropAdvanced
   args?: string[]
 }
 
@@ -105,7 +126,8 @@ export const DEFAULT_FFMPEG_JOB_CONFIG: FfmpegJobConfig = {
 
 export const FFMPEG_ACTION_LABELS: Record<FfmpegJobAction, string> = {
   probe: '探测信息',
-  trim: '裁剪',
+  trim: '时间截取',
+  crop: '画面裁剪',
   transcode: '转码',
   watermark: '水印',
   extractAudio: '提取音频',
@@ -172,6 +194,7 @@ export function legacyToJobConfig(legacy: LegacyFfmpegTaskConfig): FfmpegJobConf
   if (
     operation === 'probe' ||
     operation === 'trim' ||
+    operation === 'crop' ||
     operation === 'transcode' ||
     operation === 'watermark' ||
     operation === 'extractAudio' ||
@@ -200,6 +223,21 @@ export function legacyToJobConfig(legacy: LegacyFfmpegTaskConfig): FfmpegJobConf
       start: String(params.start ?? '0'),
       duration: String(params.duration ?? '10'),
       copyStream: params.copyStream !== false
+    }
+  }
+
+  if (action === 'crop' || operation === 'crop') {
+    config.crop = {
+      x: Number(params.x ?? 0),
+      y: Number(params.y ?? 0),
+      width: Number(params.width ?? 1920),
+      height: Number(params.height ?? 1080)
+    }
+    config.video = {
+      codec: resolveVideoCodec(params.videoCodec as string | undefined)
+    }
+    config.audio = {
+      codec: String(params.audioCodec ?? 'copy')
     }
   }
 
@@ -270,6 +308,15 @@ function mergeJobConfig(parsed: Partial<FfmpegJobConfig>): FfmpegJobConfig {
   }
   if (parsed.trim) {
     merged.trim = { ...parsed.trim }
+  }
+  if (parsed.crop) {
+    merged.crop = { ...parsed.crop }
+  }
+  if (parsed.cropAdvanced) {
+    merged.cropAdvanced = {
+      ...parsed.cropAdvanced,
+      keyframes: parsed.cropAdvanced.keyframes?.map(item => ({ ...item }))
+    }
   }
   if (parsed.filters) {
     merged.filters = parsed.filters.map(filter => ({ ...filter }))

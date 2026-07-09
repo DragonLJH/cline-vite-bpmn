@@ -72,6 +72,23 @@ function trimParamsToArgs(params?: FfmpegTaskConfig['params']): string[] {
   return args
 }
 
+function cropParamsToArgs(params?: FfmpegTaskConfig['params']): string[] {
+  const x = Number(params?.x ?? 0)
+  const y = Number(params?.y ?? 0)
+  const width = Number(params?.width ?? 1920)
+  const height = Number(params?.height ?? 1080)
+  const toEven = (n: number) => {
+    const v = Math.max(2, Math.floor(n))
+    return v % 2 === 0 ? v : v - 1
+  }
+  const args: string[] = [
+    '-vf', `crop=${toEven(width)}:${toEven(height)}:${toEven(x)}:${toEven(y)}`,
+    '-c:v', String(params?.videoCodec ?? 'libopenh264'),
+    '-c:a', String(params?.audioCodec ?? 'copy')
+  ]
+  return args
+}
+
 function extractAudioParamsToArgs(params?: FfmpegTaskConfig['params']): string[] {
   const audioCodec = String(params?.audioCodec ?? 'copy')
   return ['-vn', '-acodec', audioCodec]
@@ -98,6 +115,8 @@ export function buildOperationArgs(config: FfmpegTaskConfig): string[] {
       return []
     case 'trim':
       return trimParamsToArgs(config.params)
+    case 'crop':
+      return cropParamsToArgs(config.params)
     case 'transcode':
       return transcodeParamsToArgs(config.params as FfmpegTranscodeParams | undefined)
     case 'extractAudio':

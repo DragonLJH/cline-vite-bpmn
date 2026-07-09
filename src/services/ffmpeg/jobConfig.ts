@@ -22,6 +22,9 @@ export type {
   FfmpegJobInput,
   FfmpegJobOutput,
   FfmpegJobTrim,
+  FfmpegJobCrop,
+  FfmpegJobCropAdvanced,
+  FfmpegJobCropKeyframe,
   FfmpegJobVideo,
   FfmpegOverlayFilter,
   LegacyFfmpegTaskConfig

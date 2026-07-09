@@ -20,9 +20,19 @@ function formatArgs(args: string[]): string {
 }
 
 export function registerFfmpegIpcHandlers(): void {
-  ipcMain.handle('ffmpeg:probe', async (_event, payload: FfmpegProbeRequest) => {
+  ipcMain.handle('ffmpeg:probe', async (event, payload: FfmpegProbeRequest) => {
     try {
-      return await ffmpegManager.probe(payload.inputPath)
+      const taskId = payload.taskId || `probe_${Date.now()}`
+      const sender = event.sender
+      return await ffmpegManager.probe(payload.inputPath, {
+        onPartial: (info) => {
+          sender.send('ffmpeg:probePartial', {
+            taskId,
+            inputPath: payload.inputPath,
+            info
+          })
+        }
+      })
     } catch (error) {
       return { success: false, error: (error as Error).message }
     }

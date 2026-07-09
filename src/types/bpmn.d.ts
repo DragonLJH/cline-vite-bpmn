@@ -214,7 +214,10 @@ export type {
   FfmpegDrawtextFilter,
   FfmpegOverlayFilter,
   FfmpegJobGlobal,
-  FfmpegJobTrim
+  FfmpegJobTrim,
+  FfmpegJobCrop,
+  FfmpegJobCropAdvanced,
+  FfmpegJobCropKeyframe
 } from '../services/ffmpeg/jobConfig'
 
 export interface WorkflowTask {

@@ -1,77 +1,27 @@
 import React from 'react'
 import './index.scss'
 
-// 使用 ?raw 后缀导入 SVG 内容
-import plusSvg from '../../assets/icons/plus.svg?raw'
-import closeSvg from '../../assets/icons/close.svg?raw'
-import checkSvg from '../../assets/icons/check.svg?raw'
-import warningSvg from '../../assets/icons/warning.svg?raw'
-import clockSvg from '../../assets/icons/clock.svg?raw'
-import copySvg from '../../assets/icons/copy.svg?raw'
-import deleteSvg from '../../assets/icons/delete.svg?raw'
-import searchSvg from '../../assets/icons/search.svg?raw'
-import listSvg from '../../assets/icons/list.svg?raw'
-import settingsSvg from '../../assets/icons/settings.svg?raw'
-import chevronLeftSvg from '../../assets/icons/chevron-left.svg?raw'
-import chevronRightSvg from '../../assets/icons/chevron-right.svg?raw'
-import chevronUpSvg from '../../assets/icons/chevron-up.svg?raw'
-import chevronDownSvg from '../../assets/icons/chevron-down.svg?raw'
-import saveSvg from '../../assets/icons/save.svg?raw'
-import folderSvg from '../../assets/icons/folder.svg?raw'
-import documentSvg from '../../assets/icons/document.svg?raw'
-import editSvg from '../../assets/icons/edit.svg?raw'
+const iconModules = import.meta.glob('@/assets/icons/*.svg', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>
 
-// 图标名称类型
-export type IconName =
-  | 'plus'
-  | 'close'
-  | 'check'
-  | 'warning'
-  | 'clock'
-  | 'copy'
-  | 'delete'
-  | 'search'
-  | 'list'
-  | 'settings'
-  | 'chevron-left'
-  | 'chevron-right'
-  | 'chevron-up'
-  | 'chevron-down'
-  | 'save'
-  | 'folder'
-  | 'document'
-  | 'edit'
+const iconMap = Object.fromEntries(
+  Object.entries(iconModules).map(([path, svg]) => {
+    const name = path.match(/\/([^/]+)\.svg$/)?.[1]
+    return [name, svg]
+  }),
+) as Record<string, string>
 
 interface IconProps {
-  name: IconName
+  name: string
   size?: number | string
   color?: string
   className?: string
   style?: React.CSSProperties
   onClick?: () => void
   title?: string
-}
-
-// SVG 图标映射
-const iconMap: Record<IconName, string> = {
-  plus: plusSvg,
-  close: closeSvg,
-  check: checkSvg,
-  warning: warningSvg,
-  clock: clockSvg,
-  copy: copySvg,
-  delete: deleteSvg,
-  search: searchSvg,
-  list: listSvg,
-  settings: settingsSvg,
-  'chevron-left': chevronLeftSvg,
-  'chevron-right': chevronRightSvg,
-  'chevron-up': chevronUpSvg,
-  'chevron-down': chevronDownSvg,
-  save: saveSvg,
-  folder: folderSvg,
-  document: documentSvg,
-  edit: editSvg
 }
 
 const Icon: React.FC<IconProps> = ({
@@ -83,6 +33,15 @@ const Icon: React.FC<IconProps> = ({
   onClick,
   title
 }) => {
+  const svg = iconMap[name]
+
+  if (!svg) {
+    if (import.meta.env.DEV) {
+      console.warn(`[Icon] 未找到图标: ${name}`)
+    }
+    return null
+  }
+
   const sizeValue = typeof size === 'number' ? `${size}px` : size
 
   const iconStyle: React.CSSProperties = {
@@ -101,7 +60,7 @@ const Icon: React.FC<IconProps> = ({
       style={iconStyle}
       onClick={onClick}
       title={title}
-      dangerouslySetInnerHTML={{ __html: iconMap[name] }}
+      dangerouslySetInnerHTML={{ __html: svg }}
     />
   )
 }

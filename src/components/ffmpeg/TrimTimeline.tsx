@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react'
-import { clamp, formatSecondsToTime, parseTimeToSeconds } from '../../../../services/ffmpeg/timeUtils'
+import { clamp, formatSecondsToTime, parseTimeToSeconds } from '../../services/ffmpeg/timeUtils'
+import './TrimTimeline.scss'
 
 export interface TrimTimelineProps {
   durationSeconds: number
@@ -88,51 +89,51 @@ const TrimTimeline: React.FC<TrimTimelineProps> = ({
   const widthPct = (durSec / total) * 100
 
   return (
-    <div className={`ffmpeg-props__timeline ${disabled ? 'ffmpeg-props__timeline--disabled' : ''} ${durationEstimated ? 'ffmpeg-props__timeline--estimated' : ''}`}>
+    <div className={`ffmpeg-trim-timeline ${disabled ? 'ffmpeg-trim-timeline--disabled' : ''} ${durationEstimated ? 'ffmpeg-trim-timeline--estimated' : ''}`}>
       <div
         ref={trackRef}
-        className="ffmpeg-props__timeline-track"
+        className="ffmpeg-trim-timeline__track"
         onClick={handleTrackClick}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
       >
         <div
-          className="ffmpeg-props__timeline-range"
+          className="ffmpeg-trim-timeline__range"
           style={{ left: `${inPct}%`, width: `${widthPct}%` }}
         />
         <div
-          className="ffmpeg-props__timeline-handle ffmpeg-props__timeline-handle--in"
+          className="ffmpeg-trim-timeline__handle ffmpeg-trim-timeline__handle--in"
           style={{ left: `${inPct}%` }}
           onPointerDown={handlePointerDown('in')}
           title="入点"
         />
         <div
-          className="ffmpeg-props__timeline-handle ffmpeg-props__timeline-handle--out"
+          className="ffmpeg-trim-timeline__handle ffmpeg-trim-timeline__handle--out"
           style={{ left: `${inPct + widthPct}%` }}
           onPointerDown={handlePointerDown('out')}
           title="出点"
         />
         <div
-          className="ffmpeg-props__timeline-playhead"
+          className="ffmpeg-trim-timeline__playhead"
           style={{ left: `${(inSec / total) * 100}%` }}
           onPointerDown={handlePointerDown('playhead')}
         />
       </div>
 
       {durationEstimated && (
-        <p className="ffmpeg-props__timeline-note">时长未探测，刻度为估算值</p>
+        <p className="ffmpeg-trim-timeline__note">时长未探测，刻度为估算值</p>
       )}
 
-      <div className="ffmpeg-props__timeline-labels">
+      <div className="ffmpeg-trim-timeline__labels">
         <span>0s</span>
         <span>入 {formatSecondsToTime(inSec)}</span>
         <span>出 {formatSecondsToTime(outSec)}</span>
         <span>{formatSecondsToTime(total)}</span>
       </div>
 
-      <div className="ffmpeg-props__timeline-inputs">
-        <label className="ffmpeg-props__field">
+      <div className="ffmpeg-trim-timeline__inputs">
+        <label className="ffmpeg-trim-timeline__field">
           <span>开始</span>
           <input
             value={start}
@@ -143,7 +144,7 @@ const TrimTimeline: React.FC<TrimTimelineProps> = ({
             }}
           />
         </label>
-        <label className="ffmpeg-props__field">
+        <label className="ffmpeg-trim-timeline__field">
           <span>时长</span>
           <input
             value={duration}
@@ -154,7 +155,7 @@ const TrimTimeline: React.FC<TrimTimelineProps> = ({
             }}
           />
         </label>
-        <label className="ffmpeg-props__field">
+        <label className="ffmpeg-trim-timeline__field">
           <span>结束</span>
           <input
             value={formatSecondsToTime(outSec)}

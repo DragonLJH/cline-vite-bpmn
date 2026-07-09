@@ -8,7 +8,7 @@ import {
   updateNodeIdInXml,
   type ParsedNode 
 } from '../../../../utils/bpmnParser'
-import Icon, { type IconName } from '../../../../components/Icon'
+import Icon from '../../../../components/Icon'
 import './index.scss'
 
 interface NodeListEditorProps {
@@ -138,7 +138,7 @@ const NodeListEditor: React.FC<NodeListEditorProps> = ({ className }) => {
   }, [modelerRef, setSelectedElement])
 
   // 获取节点图标
-  const getNodeIcon = (type: string): IconName => {
+  const getNodeIcon = (type: string): string => {
     if (type.includes('Event')) return 'clock'
     if (type.includes('Task')) return 'edit'
     if (type.includes('Gateway')) return 'chevron-right'

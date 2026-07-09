@@ -28,10 +28,26 @@ export type {
   FfmpegJobInput,
   FfmpegJobOutput,
   FfmpegJobTrim,
+  FfmpegJobCrop,
+  FfmpegJobCropAdvanced,
+  FfmpegJobCropKeyframe,
   FfmpegJobVideo,
   FfmpegOverlayFilter,
   LegacyFfmpegTaskConfig
 } from './jobConfig'
+
+export {
+  buildCropSegments,
+  buildKeyframeCropFilterComplex,
+  findKeyframeIndexAtTime,
+  getCropDurationHint,
+  isKeyframeCropMode,
+  resolveCropAtTime,
+  sortCropKeyframes,
+  toEvenCrop
+} from './cropKeyframes'
+
+export type { CropSegment, KeyframeCropFilterResult } from './cropKeyframes'
 
 export {
   buildJobCommand,

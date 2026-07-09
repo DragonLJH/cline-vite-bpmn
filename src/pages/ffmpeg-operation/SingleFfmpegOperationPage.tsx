@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import type { FfmpegMediaInfo } from '../../shared/electron/ffmpegApi'
 import type { FfmpegJobAction, FfmpegJobConfig, FfmpegJobFilter } from '../../services/ffmpeg'
 import {
   AUDIO_CODEC_OPTIONS,
@@ -9,6 +10,19 @@ import {
   previewJobCommand,
   serializeFfmpegJobConfig
 } from '../../services/ffmpeg'
+import { toLocalMediaUrl } from '../../services/ffmpeg/coordinateUtils'
+import { formatSecondsToFfmpegTime, formatSecondsToTime, parseTimeToSeconds } from '../../services/ffmpeg/timeUtils'
+import { readPreviewAsDataUrl } from '../../services/ffmpeg/previewUtils'
+import TrimTimeline from '../../components/ffmpeg/TrimTimeline'
+import SeekTimeline from '../../components/ffmpeg/SeekTimeline'
+import CropCanvas from '../../components/ffmpeg/CropCanvas'
+import {
+  findKeyframeIndexAtTime,
+  resolveCropAtTime,
+  sortCropKeyframes
+} from '../../shared/ffmpeg/cropKeyframes'
+import type { FfmpegJobCropKeyframe } from '../../services/ffmpeg'
+import { mergeMediaInfo } from '../ffmpeg-probe/mergeMediaInfo'
 import './index.scss'
 
 export interface FfmpegOperationPageSpec {
@@ -29,10 +43,17 @@ export const FFMPEG_OPERATION_PAGE_SPECS: Record<FfmpegJobAction, FfmpegOperatio
   },
   trim: {
     action: 'trim',
-    title: 'FFmpeg 裁剪',
+    title: 'FFmpeg 时间截取',
     description: '按开始时间和持续时长截取音视频片段',
     path: '/ffmpeg-trim',
     icon: '✂️'
+  },
+  crop: {
+    action: 'crop',
+    title: 'FFmpeg 画面裁剪',
+    description: '拖拽视频四边裁切画面区域，输出指定宽高片段',
+    path: '/ffmpeg-crop',
+    icon: '🖼️'
   },
   transcode: {
     action: 'transcode',
@@ -75,6 +96,7 @@ const DEFAULT_INPUT_PATH = '/path/to/input.mp4'
 const DEFAULT_OUTPUT_PATH = '/path/to/output.mp4'
 
 type RunStatus = 'idle' | 'running' | 'success' | 'failed'
+type MediaProbeStatus = 'idle' | 'probing' | 'done' | 'failed'
 
 interface RunState {
   status: RunStatus
@@ -99,6 +121,14 @@ function createDefaultOperationConfig(action: FfmpegJobAction): FfmpegJobConfig 
       return {
         ...base,
         trim: { start: '0', duration: '10', copyStream: true, precise: false }
+      }
+    case 'crop':
+      return {
+        ...base,
+        crop: { x: 0, y: 0, width: 1920, height: 1080 },
+        cropAdvanced: { mode: 'static', keyframes: [], interp: 'step' },
+        video: { codec: 'libopenh264' },
+        audio: { codec: 'copy' }
       }
     case 'transcode':
       return {
@@ -157,9 +187,54 @@ const SingleFfmpegOperationPage: React.FC<SingleFfmpegOperationPageProps> = ({ a
   const [commandPreview, setCommandPreview] = useState('')
   const [concatInputs, setConcatInputs] = useState<string[]>([])
   const [runState, setRunState] = useState<RunState>({ status: 'idle' })
+  const [probeMediaInfo, setProbeMediaInfo] = useState<FfmpegMediaInfo | null>(null)
+  const [probeDisplayStatus, setProbeDisplayStatus] = useState<ProbeDisplayStatus>('idle')
+  const [trimMediaInfo, setTrimMediaInfo] = useState<FfmpegMediaInfo | null>(null)
+  const [trimProbeStatus, setTrimProbeStatus] = useState<MediaProbeStatus>('idle')
+  const [cropMediaInfo, setCropMediaInfo] = useState<FfmpegMediaInfo | null>(null)
+  const [cropProbeStatus, setCropProbeStatus] = useState<MediaProbeStatus>('idle')
+  const [cropPreviewTime, setCropPreviewTime] = useState(0)
+  const [cropPreviewImage, setCropPreviewImage] = useState<string | null>(null)
+  const [cropSnapshotLoading, setCropSnapshotLoading] = useState(false)
+  const trimVideoRef = useRef<HTMLVideoElement>(null)
 
   const configJson = useMemo(() => serializeFfmpegJobConfig(config), [config])
   const overlayFilter = getOverlayFilter(config)
+  const inputPath = config.input?.path || ''
+  const hasValidInput = Boolean(
+    inputPath && inputPath !== DEFAULT_INPUT_PATH && !inputPath.endsWith('个文件待合并')
+  )
+  const trimMediaDuration = trimMediaInfo?.durationSeconds
+    || parseTimeToSeconds(trimMediaInfo?.duration)
+    || 60
+  const trimVideoSrc = action === 'trim' && hasValidInput ? toLocalMediaUrl(inputPath) : null
+  const cropVideoSrc = action === 'crop' && hasValidInput ? toLocalMediaUrl(inputPath) : null
+  const cropRealW = cropMediaInfo?.width || 1920
+  const cropRealH = cropMediaInfo?.height || 1080
+  const cropMediaDuration = cropMediaInfo?.durationSeconds
+    || parseTimeToSeconds(cropMediaInfo?.duration)
+    || 60
+  const cropRegion = config.crop || { x: 0, y: 0, width: cropRealW, height: cropRealH }
+  const isCropKeyframeMode = config.cropAdvanced?.mode === 'keyframes'
+  const cropKeyframeTimes = useMemo(
+    () => sortCropKeyframes(config.cropAdvanced?.keyframes || []).map(item => item.time),
+    [config.cropAdvanced?.keyframes]
+  )
+  const cropDisplayRegion = useMemo(() => {
+    if (!isCropKeyframeMode) return cropRegion
+    return resolveCropAtTime(
+      config.cropAdvanced?.keyframes,
+      cropPreviewTime,
+      cropRegion,
+      cropMediaDuration
+    )
+  }, [
+    isCropKeyframeMode,
+    config.cropAdvanced?.keyframes,
+    cropPreviewTime,
+    cropRegion,
+    cropMediaDuration
+  ])
 
   useEffect(() => {
     let cancelled = false
@@ -186,6 +261,230 @@ const SingleFfmpegOperationPage: React.FC<SingleFfmpegOperationPageProps> = ({ a
   const patchConfig = (patch: Partial<FfmpegJobConfig>) => {
     setConfig(current => ({ ...current, ...patch }))
   }
+
+  const probeTrimMedia = useCallback(async (path: string) => {
+    setTrimMediaInfo(null)
+    setTrimProbeStatus('probing')
+
+    const ffmpeg = window.electronAPI?.ffmpeg
+    if (!ffmpeg?.probe) {
+      setTrimProbeStatus('failed')
+      return
+    }
+
+    try {
+      const result = await ffmpeg.probe({ inputPath: path })
+      if (!result.success || !result.info) {
+        setTrimProbeStatus('failed')
+        return
+      }
+
+      setTrimMediaInfo(result.info)
+      setTrimProbeStatus('done')
+
+      const total = result.info.durationSeconds || parseTimeToSeconds(result.info.duration)
+      if (total > 0) {
+        setConfig(current => ({
+          ...current,
+          trim: {
+            ...current.trim,
+            start: '0',
+            duration: formatSecondsToTime(total),
+            copyStream: current.trim?.copyStream !== false,
+            precise: current.trim?.precise === true
+          }
+        }))
+      }
+    } catch {
+      setTrimProbeStatus('failed')
+    }
+  }, [])
+
+  const handleTrimSeekPreview = useCallback((seconds: number) => {
+    const video = trimVideoRef.current
+    if (!video) return
+    video.currentTime = seconds
+  }, [])
+
+  useEffect(() => {
+    if (action !== 'trim' || !trimVideoSrc) return
+    const video = trimVideoRef.current
+    if (!video) return
+    const startSec = parseTimeToSeconds(config.trim?.start)
+    video.currentTime = startSec
+  }, [action, trimVideoSrc, config.trim?.start])
+
+  useEffect(() => {
+    if (action !== 'trim') return
+    if (!hasValidInput) {
+      setTrimMediaInfo(null)
+      setTrimProbeStatus('idle')
+      return
+    }
+    void probeTrimMedia(inputPath)
+  }, [action, hasValidInput, inputPath, probeTrimMedia])
+
+  const probeCropMedia = useCallback(async (path: string) => {
+    setCropMediaInfo(null)
+    setCropProbeStatus('probing')
+    setCropPreviewImage(null)
+    setCropPreviewTime(0)
+
+    const ffmpeg = window.electronAPI?.ffmpeg
+    if (!ffmpeg?.probe) {
+      setCropProbeStatus('failed')
+      return
+    }
+
+    try {
+      const result = await ffmpeg.probe({ inputPath: path })
+      if (!result.success || !result.info) {
+        setCropProbeStatus('failed')
+        return
+      }
+
+      setCropMediaInfo(result.info)
+      setCropProbeStatus('done')
+
+      const width = result.info.width || 1920
+      const height = result.info.height || 1080
+      const durationSeconds = result.info.durationSeconds || parseTimeToSeconds(result.info.duration)
+      setConfig(current => ({
+        ...current,
+        crop: { x: 0, y: 0, width, height },
+        cropAdvanced: {
+          ...current.cropAdvanced,
+          durationSeconds: durationSeconds || current.cropAdvanced?.durationSeconds
+        }
+      }))
+    } catch {
+      setCropProbeStatus('failed')
+    }
+  }, [])
+
+  const refreshCropPreview = useCallback(async (seconds: number) => {
+    if (!hasValidInput || !window.electronAPI?.ffmpeg?.snapshot) return
+    setCropSnapshotLoading(true)
+    try {
+      const result = await window.electronAPI.ffmpeg.snapshot({
+        inputPath,
+        time: formatSecondsToFfmpegTime(seconds),
+        accurate: true
+      })
+      if (result.success && result.path) {
+        const dataUrl = await readPreviewAsDataUrl(result.path)
+        if (dataUrl) {
+          setCropPreviewImage(dataUrl)
+          setCropPreviewTime(seconds)
+        }
+      }
+    } finally {
+      setCropSnapshotLoading(false)
+    }
+  }, [hasValidInput, inputPath])
+
+  useEffect(() => {
+    if (action !== 'crop' || cropProbeStatus !== 'done' || !hasValidInput) return
+    void refreshCropPreview(0)
+  }, [action, cropProbeStatus, hasValidInput, inputPath, refreshCropPreview])
+
+  useEffect(() => {
+    if (action !== 'crop') return
+    if (!hasValidInput) {
+      setCropMediaInfo(null)
+      setCropProbeStatus('idle')
+      return
+    }
+    void probeCropMedia(inputPath)
+  }, [action, hasValidInput, inputPath, probeCropMedia])
+
+  const handleCropRegionChange = useCallback((patch: Partial<typeof cropRegion>) => {
+    if (isCropKeyframeMode) {
+      setConfig(current => {
+        const keyframes = [...(current.cropAdvanced?.keyframes || [])]
+        const time = cropPreviewTime
+        const base = resolveCropAtTime(
+          keyframes,
+          time,
+          current.crop || cropRegion,
+          cropMediaDuration
+        )
+        const nextKeyframe: FfmpegJobCropKeyframe = { time, ...base, ...patch }
+        const index = findKeyframeIndexAtTime(keyframes, time)
+        if (index >= 0) keyframes[index] = nextKeyframe
+        else keyframes.push(nextKeyframe)
+        return {
+          ...current,
+          cropAdvanced: {
+            ...current.cropAdvanced,
+            mode: 'keyframes',
+            interp: 'step',
+            durationSeconds: cropMediaDuration,
+            keyframes: sortCropKeyframes(keyframes)
+          }
+        }
+      })
+      return
+    }
+    setConfig(current => ({
+      ...current,
+      crop: { ...(current.crop || cropRegion), ...patch }
+    }))
+  }, [cropMediaDuration, cropPreviewTime, cropRegion, isCropKeyframeMode])
+
+  const addCropKeyframe = useCallback(() => {
+    setConfig(current => {
+      const keyframes = [...(current.cropAdvanced?.keyframes || [])]
+      if (findKeyframeIndexAtTime(keyframes, cropPreviewTime) >= 0) return current
+      keyframes.push({ time: cropPreviewTime, ...cropDisplayRegion })
+      return {
+        ...current,
+        cropAdvanced: {
+          mode: 'keyframes',
+          interp: 'step',
+          durationSeconds: cropMediaDuration,
+          keyframes: sortCropKeyframes(keyframes)
+        }
+      }
+    })
+  }, [cropDisplayRegion, cropMediaDuration, cropPreviewTime])
+
+  const removeCropKeyframe = useCallback(() => {
+    setConfig(current => ({
+      ...current,
+      cropAdvanced: {
+        ...current.cropAdvanced,
+        mode: 'keyframes',
+        keyframes: (current.cropAdvanced?.keyframes || []).filter(
+          item => Math.abs(item.time - cropPreviewTime) > 0.05
+        )
+      }
+    }))
+  }, [cropPreviewTime])
+
+  const toggleCropKeyframeMode = useCallback((enabled: boolean) => {
+    if (enabled) {
+      setConfig(current => ({
+        ...current,
+        cropAdvanced: {
+          mode: 'keyframes',
+          interp: 'step',
+          durationSeconds: cropMediaDuration,
+          keyframes: [{ time: 0, ...(current.crop || cropRegion) }]
+        }
+      }))
+      return
+    }
+    setConfig(current => ({
+      ...current,
+      cropAdvanced: {
+        mode: 'static',
+        keyframes: [],
+        interp: 'step',
+        durationSeconds: cropMediaDuration
+      }
+    }))
+  }, [cropMediaDuration, cropRegion])
 
   const updateInput = (patch: NonNullable<FfmpegJobConfig['input']>) => {
     setConfig(current => ({ ...current, input: { ...current.input, ...patch } }))
@@ -228,6 +527,10 @@ const SingleFfmpegOperationPage: React.FC<SingleFfmpegOperationPageProps> = ({ a
     if (paths?.[0]) {
       updateInput({ path: paths[0] })
       setRunState({ status: 'idle' })
+      if (action === 'probe') {
+        setProbeMediaInfo(null)
+        setProbeDisplayStatus('idle')
+      }
     }
   }
 
@@ -295,14 +598,33 @@ const SingleFfmpegOperationPage: React.FC<SingleFfmpegOperationPageProps> = ({ a
       }
 
       if (action === 'probe') {
-        const result = await ffmpeg.probe({ inputPath })
-        setRunState({
-          status: result.success ? 'success' : 'failed',
-          progress: result.success ? 100 : 0,
-          stdout: result.info ? JSON.stringify(result.info, null, 2) : undefined,
-          stderr: result.info?.raw,
-          error: result.error
+        const probeTaskId = `probe_${Date.now()}`
+        setProbeMediaInfo(null)
+        setProbeDisplayStatus('probing')
+        setRunState({ status: 'running' })
+
+        const unsubscribePartial = ffmpeg.onProbePartial?.((data) => {
+          if (data.taskId !== probeTaskId) return
+          setProbeMediaInfo(prev => mergeMediaInfo(prev, data.info))
         })
+
+        try {
+          const result = await ffmpeg.probe({ inputPath, taskId: probeTaskId })
+          const finalInfo = result.info || null
+          if (finalInfo) {
+            setProbeMediaInfo(finalInfo)
+          }
+          setProbeDisplayStatus(result.success ? 'done' : 'failed')
+          setRunState({
+            status: result.success ? 'success' : 'failed',
+            progress: result.success ? 100 : 0,
+            stdout: finalInfo ? JSON.stringify(finalInfo, null, 2) : undefined,
+            stderr: finalInfo?.raw,
+            error: result.error
+          })
+        } finally {
+          unsubscribePartial?.()
+        }
         return
       }
 
@@ -357,6 +679,11 @@ const SingleFfmpegOperationPage: React.FC<SingleFfmpegOperationPageProps> = ({ a
     </label>
   )
 
+  const probeResultJson = useMemo(() => {
+    if (action !== 'probe' || !probeMediaInfo) return ''
+    return JSON.stringify(probeMediaInfo, null, 2)
+  }, [action, probeMediaInfo])
+
   const renderOperationFields = () => {
     switch (action) {
       case 'probe':
@@ -367,23 +694,115 @@ const SingleFfmpegOperationPage: React.FC<SingleFfmpegOperationPageProps> = ({ a
         )
       case 'trim':
         return (
-          <div className="ffmpeg-op-page__grid">
-            <label className="ffmpeg-op-page__field">
-              <span>开始时间</span>
-              <input value={config.trim?.start || ''} onChange={event => patchConfig({ trim: { ...config.trim, start: event.target.value } })} placeholder="0 或 00:00:05" />
-            </label>
-            <label className="ffmpeg-op-page__field">
-              <span>持续时长</span>
-              <input value={config.trim?.duration || ''} onChange={event => patchConfig({ trim: { ...config.trim, duration: event.target.value } })} placeholder="10 或 00:00:10" />
-            </label>
-            <label className="ffmpeg-op-page__check">
-              <input type="checkbox" checked={config.trim?.copyStream !== false} onChange={event => patchConfig({ trim: { ...config.trim, copyStream: event.target.checked } })} />
-              复制码流
-            </label>
-            <label className="ffmpeg-op-page__check">
-              <input type="checkbox" checked={config.trim?.precise === true} onChange={event => patchConfig({ trim: { ...config.trim, precise: event.target.checked } })} />
-              精准裁剪
-            </label>
+          <div className="ffmpeg-op-page__stack">
+            {!hasValidInput && (
+              <div className="ffmpeg-op-page__note">
+                请先选择输入视频，选择后将自动探测时长，并可通过拖拽时间轴边界进行裁剪。
+              </div>
+            )}
+            {hasValidInput && trimProbeStatus === 'probing' && (
+              <p className="ffmpeg-op-page__trim-hint">正在探测视频时长…</p>
+            )}
+            {hasValidInput && trimVideoSrc && (
+              <div className="ffmpeg-op-page__trim-preview">
+                <video
+                  ref={trimVideoRef}
+                  className="ffmpeg-op-page__trim-video"
+                  src={trimVideoSrc}
+                  controls
+                  preload="metadata"
+                />
+              </div>
+            )}
+            <TrimTimeline
+              durationSeconds={trimMediaDuration}
+              start={String(config.trim?.start ?? '0')}
+              duration={String(config.trim?.duration ?? '10')}
+              onChange={patch => patchConfig({ trim: { ...config.trim, ...patch } })}
+              onSeekPreview={hasValidInput ? handleTrimSeekPreview : undefined}
+              disabled={!hasValidInput || trimProbeStatus === 'probing'}
+              durationEstimated={trimProbeStatus !== 'done'}
+            />
+            <div className="ffmpeg-op-page__grid">
+              <label className="ffmpeg-op-page__check">
+                <input type="checkbox" checked={config.trim?.copyStream !== false} onChange={event => patchConfig({ trim: { ...config.trim, copyStream: event.target.checked } })} />
+                复制码流
+              </label>
+              <label className="ffmpeg-op-page__check">
+                <input type="checkbox" checked={config.trim?.precise === true} onChange={event => patchConfig({ trim: { ...config.trim, precise: event.target.checked } })} />
+                精准裁剪
+              </label>
+            </div>
+            {config.trim?.copyStream !== false && (
+              <p className="ffmpeg-op-page__trim-hint">流复制模式下裁剪点可能对齐到关键帧，画面略有偏差。</p>
+            )}
+          </div>
+        )
+      case 'crop':
+        return (
+          <div className="ffmpeg-op-page__stack">
+            {!hasValidInput && (
+              <div className="ffmpeg-op-page__note">
+                请先选择输入视频，选择后将自动探测分辨率，拖动时间轴截取预览帧后进行画面裁剪。
+              </div>
+            )}
+            {hasValidInput && cropProbeStatus === 'probing' && (
+              <p className="ffmpeg-op-page__trim-hint">正在探测视频分辨率…</p>
+            )}
+            {hasValidInput && (
+              <>
+                <label className="ffmpeg-op-page__check">
+                  <input
+                    type="checkbox"
+                    checked={isCropKeyframeMode}
+                    onChange={event => toggleCropKeyframeMode(event.target.checked)}
+                  />
+                  高级模式（关键帧分段裁剪）
+                </label>
+                {isCropKeyframeMode && (
+                  <div className="ffmpeg-op-page__crop-keyframe-actions">
+                    <button type="button" onClick={addCropKeyframe}>在当前时间点添加关键帧</button>
+                    <button type="button" onClick={removeCropKeyframe}>删除当前关键帧</button>
+                    <span>{cropKeyframeTimes.length} 个关键帧</span>
+                  </div>
+                )}
+              </>
+            )}
+            {hasValidInput && (
+              <SeekTimeline
+                durationSeconds={cropMediaDuration}
+                currentSeconds={cropPreviewTime}
+                onSeek={seconds => void refreshCropPreview(seconds)}
+                keyframeTimes={isCropKeyframeMode ? cropKeyframeTimes : undefined}
+                onKeyframeSelect={seconds => void refreshCropPreview(seconds)}
+                disabled={!hasValidInput || cropProbeStatus === 'probing'}
+                durationEstimated={cropProbeStatus !== 'done'}
+                loading={cropSnapshotLoading}
+              />
+            )}
+            {hasValidInput && (cropPreviewImage || cropVideoSrc) && (
+              <CropCanvas
+                videoSrc={cropPreviewImage ? null : cropVideoSrc}
+                previewImageUrl={cropPreviewImage}
+                realW={cropRealW}
+                realH={cropRealH}
+                crop={cropDisplayRegion}
+                onChange={handleCropRegionChange}
+                disabled={!hasValidInput || cropProbeStatus === 'probing'}
+                resolutionEstimated={cropProbeStatus !== 'done'}
+                previewLoading={cropSnapshotLoading}
+              />
+            )}
+            <div className="ffmpeg-op-page__grid">
+              {renderCodecSelect('视频编码', config.video?.codec, VIDEO_CODEC_OPTIONS, value => updateVideo({ codec: value }))}
+              {renderCodecSelect('音频编码', config.audio?.codec, AUDIO_CODEC_OPTIONS, value => updateAudio({ codec: value }))}
+            </div>
+            <p className="ffmpeg-op-page__trim-hint">
+              {isCropKeyframeMode
+                ? '高级模式：相邻关键帧之间按阶跃方式应用不同裁剪区域，最终 concat 合并；时间轴用于预览与打点。'
+                : '简单模式：全片使用同一裁剪区域；时间轴仅用于选择预览帧。'}
+              执行时需重编码，不支持流复制。
+            </p>
           </div>
         )
       case 'transcode':
@@ -536,10 +955,17 @@ const SingleFfmpegOperationPage: React.FC<SingleFfmpegOperationPageProps> = ({ a
             <button type="button" onClick={runOperation} disabled={runState.status === 'running'}>
               {runState.status === 'running' ? '执行中...' : action === 'probe' ? '开始探测' : '执行操作'}
             </button>
-            {runState.status === 'running' && (
+            {runState.status === 'running' && action !== 'probe' && (
               <span>进度 {runState.progress ?? 0}%</span>
             )}
+            {action === 'probe' && probeDisplayStatus === 'probing' && (
+              <span className="ffmpeg-op-page__probe-hint">正在读取媒体流信息…</span>
+            )}
           </div>
+
+          {action === 'probe' && (
+            <ProbeMediaInfoGrid status={probeDisplayStatus} info={probeMediaInfo} />
+          )}
         </section>
 
         <aside className="ffmpeg-op-page__side">
@@ -561,8 +987,10 @@ const SingleFfmpegOperationPage: React.FC<SingleFfmpegOperationPageProps> = ({ a
             {runState.error && (
               <p className="ffmpeg-op-page__result-error">{runState.error}</p>
             )}
-            {(runState.stdout || runState.stderr) && (
-              <pre className="ffmpeg-op-page__code">{runState.stdout || runState.stderr}</pre>
+            {(runState.stdout || runState.stderr || probeResultJson) && (
+              <pre className="ffmpeg-op-page__code">
+                {action === 'probe' ? (probeResultJson || runState.stderr) : (runState.stdout || runState.stderr)}
+              </pre>
             )}
           </section>
 

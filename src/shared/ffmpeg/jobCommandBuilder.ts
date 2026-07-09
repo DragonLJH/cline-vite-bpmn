@@ -1,4 +1,12 @@
 import type { FfmpegJobConfig, FfmpegJobFilter } from './jobConfig'
+import {
+  buildCropSegments,
+  buildKeyframeCropFilterComplex,
+  getCropDurationHint,
+  isKeyframeCropMode,
+  toEvenCrop,
+  type KeyframeCropFilterResult
+} from './cropKeyframes'
 import { DEFAULT_VIDEO_CODEC, resolveVideoCodec, supportsX264Preset } from './codecResolver'
 
 interface FilterGraphResult {
@@ -176,7 +184,7 @@ function appendVideoAudioArgs(args: string[], config: FfmpegJobConfig) {
 
   if (videoCodec) {
     args.push('-c:v', videoCodec)
-  } else if (config.action === 'transcode' || hasFilters) {
+  } else if (config.action === 'transcode' || config.action === 'crop' || hasFilters) {
     args.push('-c:v', DEFAULT_VIDEO_CODEC)
   }
 
@@ -190,10 +198,28 @@ function appendVideoAudioArgs(args: string[], config: FfmpegJobConfig) {
 
   if (config.audio?.codec) {
     args.push('-c:a', config.audio.codec)
-  } else if (hasFilters || config.action === 'watermark') {
+  } else if (hasFilters || config.action === 'watermark' || config.action === 'crop') {
     args.push('-c:a', 'copy')
   }
   if (config.audio?.bitrate) args.push('-b:a', config.audio.bitrate)
+}
+
+function toEven(value: number): number {
+  return toEvenCrop(value)
+}
+
+function appendCropOutputArgs(
+  args: string[],
+  config: FfmpegJobConfig,
+  filterResult: KeyframeCropFilterResult
+) {
+  args.push('-filter_complex', filterResult.filterComplex)
+  args.push('-map', filterResult.mapVideo)
+  if (filterResult.mapAudio) args.push('-map', filterResult.mapAudio)
+  appendVideoAudioArgs(args, config)
+  if (!resolveVideoCodec(config.video?.codec)) {
+    args.push('-c:v', DEFAULT_VIDEO_CODEC)
+  }
 }
 
 export function buildJobCommand(
@@ -256,6 +282,55 @@ export function buildJobCommand(
       }
       if (outputPath) args.push(outputPath)
       return args
+
+    case 'crop': {
+      appendGlobalArgs(args, config)
+      args.push('-i', inputPath)
+      const fallbackCrop = config.crop || { x: 0, y: 0, width: 1920, height: 1080 }
+
+      if (isKeyframeCropMode(config.cropAdvanced)) {
+        const duration = getCropDurationHint(config.cropAdvanced)
+        const segments = buildCropSegments(
+          config.cropAdvanced!.keyframes || [],
+          duration,
+          fallbackCrop
+        )
+        const includeAudio = config.audio?.codec !== 'none'
+        const filterResult = buildKeyframeCropFilterComplex(segments, { includeAudio })
+        if (filterResult && segments.length > 1) {
+          appendCropOutputArgs(args, config, filterResult)
+          if (outputPath) args.push(outputPath)
+          return args
+        }
+        if (filterResult && segments.length === 1) {
+          const only = segments[0].crop
+          const w = toEven(only.width)
+          const h = toEven(only.height)
+          const x = toEven(only.x)
+          const y = toEven(only.y)
+          args.push('-vf', `crop=${w}:${h}:${x}:${y}`)
+          appendVideoAudioArgs(args, config)
+          if (!resolveVideoCodec(config.video?.codec)) {
+            args.push('-c:v', DEFAULT_VIDEO_CODEC)
+          }
+          if (outputPath) args.push(outputPath)
+          return args
+        }
+      }
+
+      const crop = fallbackCrop
+      const w = toEven(crop.width)
+      const h = toEven(crop.height)
+      const x = toEven(crop.x)
+      const y = toEven(crop.y)
+      args.push('-vf', `crop=${w}:${h}:${x}:${y}`)
+      appendVideoAudioArgs(args, config)
+      if (!resolveVideoCodec(config.video?.codec)) {
+        args.push('-c:v', DEFAULT_VIDEO_CODEC)
+      }
+      if (outputPath) args.push(outputPath)
+      return args
+    }
 
     case 'watermark': {
       appendGlobalArgs(args, config)

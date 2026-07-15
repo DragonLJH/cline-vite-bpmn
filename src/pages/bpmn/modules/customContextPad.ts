@@ -14,6 +14,10 @@ class FfmpegContextPadProvider extends ContextPadProvider {
       filtered['append.service-task'] = this.createServiceTaskAppendEntry(element)
     }
 
+    if (this.shouldShowParallelGatewayAppend(element)) {
+      filtered['append.parallel-gateway'] = this.createParallelGatewayAppendEntry(element)
+    }
+
     return filtered
   }
 
@@ -22,40 +26,48 @@ class FfmpegContextPadProvider extends ContextPadProvider {
 
     if (!is(businessObject, 'bpmn:FlowNode')) return false
     if (is(businessObject, 'bpmn:EventBasedGateway')) return false
+    if (is(businessObject, 'bpmn:ParallelGateway')) return false
     if (businessObject.isForCompensation) return false
 
     return true
   }
 
-  createServiceTaskAppendEntry(element: any) {
+  shouldShowParallelGatewayAppend(element: any): boolean {
+    const businessObject = element.businessObject
+    if (!is(businessObject, 'bpmn:ParallelGateway')) return false
+    if (businessObject.isForCompensation) return false
+    return true
+  }
+
+  createShapeAppendEntry(element: any, shapeType: string, className: string, title: string) {
     const elementFactory = (this as any)._elementFactory
     const create = (this as any)._create
     const autoPlace = (this as any)._autoPlace
     const appendPreview = (this as any)._appendPreview
 
     function appendStart(event: Event, source: any) {
-      const shape = elementFactory.createShape({ type: 'bpmn:ServiceTask' })
+      const shape = elementFactory.createShape({ type: shapeType })
       create.start(event, shape, { source })
     }
 
     const append = autoPlace
       ? (_: Event, source: any) => {
-          const shape = elementFactory.createShape({ type: 'bpmn:ServiceTask' })
+          const shape = elementFactory.createShape({ type: shapeType })
           autoPlace.append(source, shape)
         }
       : appendStart
 
     const previewAppend = autoPlace
       ? (_: Event, source: any) => {
-          appendPreview.create(source, 'bpmn:ServiceTask')
+          appendPreview.create(source, shapeType)
           return () => appendPreview.cleanUp()
         }
       : null
 
     return {
       group: 'model',
-      className: 'bpmn-icon-service-task',
-      title: '追加 FFmpeg 服务任务',
+      className,
+      title,
       action: assign(
         {
           dragstart: appendStart,
@@ -64,6 +76,24 @@ class FfmpegContextPadProvider extends ContextPadProvider {
         previewAppend ? { hover: previewAppend } : {}
       )
     }
+  }
+
+  createServiceTaskAppendEntry(element: any) {
+    return this.createShapeAppendEntry(
+      element,
+      'bpmn:ServiceTask',
+      'bpmn-icon-service-task',
+      '追加 FFmpeg 服务任务'
+    )
+  }
+
+  createParallelGatewayAppendEntry(element: any) {
+    return this.createShapeAppendEntry(
+      element,
+      'bpmn:ParallelGateway',
+      'bpmn-icon-gateway-parallel',
+      '追加并行网关'
+    )
   }
 }
 

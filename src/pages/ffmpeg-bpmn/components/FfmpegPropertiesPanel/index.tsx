@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react'
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 
 import { useFfmpegBpmnStore } from '../../../../stores/ffmpegBpmnStore'
 
@@ -17,6 +17,13 @@ import {
 } from '../../../../services/ffmpeg/configCodec'
 
 import { previewJobCommand } from '../../../../services/ffmpeg/jobCommandBuilder'
+import { DEFAULT_FFMPEG_CONCAT_COPY } from '../../../../shared/ffmpeg/jobConfig'
+import {
+  canUseMergeAction,
+  collectEntryInputTasks,
+  collectUpstreamServiceTasks
+} from '../../../../shared/ffmpeg/mergeInputs'
+import { parseWorkflowGraph } from '../../../../utils/bpmnParser'
 
 import {
 
@@ -54,9 +61,7 @@ import './index.scss'
 
 
 
-const ACTIONS: FfmpegJobAction[] = [
-
-  'probe',
+const BASE_ACTIONS: FfmpegJobAction[] = [
 
   'trim',
 
@@ -111,7 +116,10 @@ const FfmpegPropertiesPanel: React.FC = () => {
     setHasUnsavedChanges,
     previewContext,
     refreshPreview,
-    setActiveTab
+    setActiveTab,
+    bpmnXml,
+    setActivePreviewTaskId,
+    getPreviewSourceForTask
   } = useFfmpegBpmnStore()
 
   const [elementName, setElementName] = useState('')
@@ -137,10 +145,37 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
   const isServiceTask = selectedElement?.type === 'bpmn:ServiceTask'
 
-  const previewAvailable = ffmpegConfig.input?.source !== 'prev'
+  const workflowGraph = useMemo(() => parseWorkflowGraph(bpmnXml), [bpmnXml])
+  const mergeAllowed = useMemo(
+    () => (elementId ? canUseMergeAction(elementId, workflowGraph) : false),
+    [elementId, workflowGraph]
+  )
+  const availableActions = useMemo(
+    () => (mergeAllowed ? [...BASE_ACTIONS, 'concat' as const] : BASE_ACTIONS),
+    [mergeAllowed]
+  )
+  const upstreamBranchIds = useMemo(
+    () => (elementId && workflowGraph ? collectUpstreamServiceTasks(elementId, workflowGraph) : []),
+    [elementId, workflowGraph]
+  )
+  const entryTaskIds = useMemo(
+    () => new Set((workflowGraph ? collectEntryInputTasks(workflowGraph) : []).map(task => task.id)),
+    [workflowGraph]
+  )
+  const previewSource = getPreviewSourceForTask(
+    selectedElement?.id && entryTaskIds.has(selectedElement.id) ? selectedElement.id : previewContext.activePreviewTaskId
+  )
+  const activeEntryTaskId = selectedElement?.id && entryTaskIds.has(selectedElement.id)
+    ? selectedElement.id
+    : previewContext.activePreviewTaskId
+  const activeEntryState = activeEntryTaskId ? previewContext.entryInputs[activeEntryTaskId] : null
+  const previewAvailable = ffmpegConfig.action !== 'concat'
+    && ffmpegConfig.input?.source !== 'prev'
+    && ffmpegConfig.input?.source !== 'merge'
+    && (entryTaskIds.has(selectedElement?.id || '') || ffmpegConfig.input?.source === 'input')
 
-  const mediaDuration = previewContext.mediaInfo?.durationSeconds
-    || parseTimeToSeconds(previewContext.mediaInfo?.duration)
+  const mediaDuration = previewSource.mediaInfo?.durationSeconds
+    || parseTimeToSeconds(previewSource.mediaInfo?.duration)
     || 60
 
   const filterTimeMax = ffmpegConfig.action === 'trim'
@@ -160,7 +195,7 @@ const FfmpegPropertiesPanel: React.FC = () => {
     const loadPreview = async () => {
       const result = await window.electronAPI?.ffmpeg.previewJobCommand?.({
         config: ffmpegConfig,
-        inputPath: previewContext.inputPath || undefined,
+        inputPath: previewSource.inputPath || undefined,
         overlayImages: (ffmpegConfig.filters || [])
           .filter((filter): filter is Extract<FfmpegJobFilter, { type: 'overlay' }> => filter.type === 'overlay')
           .map(filter => filter.image)
@@ -172,7 +207,25 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
     loadPreview()
     return () => { cancelled = true }
-  }, [ffmpegConfig, isServiceTask, previewContext.inputPath])
+  }, [ffmpegConfig, isServiceTask, previewSource.inputPath])
+
+  useEffect(() => {
+    if (!selectedElement?.id || !entryTaskIds.has(selectedElement.id)) return
+    setActivePreviewTaskId(selectedElement.id)
+  }, [selectedElement?.id, entryTaskIds, setActivePreviewTaskId])
+
+  useEffect(() => {
+    if (ffmpegConfig.action === 'concat' && !mergeAllowed) {
+      setFfmpegConfig(prev => ({
+        ...prev,
+        action: 'transcode',
+        concat: undefined,
+        video: { codec: 'libopenh264', preset: 'medium' },
+        audio: { codec: 'aac' }
+      }))
+      setHasChanges(true)
+    }
+  }, [ffmpegConfig.action, mergeAllowed])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -204,28 +257,6 @@ const FfmpegPropertiesPanel: React.FC = () => {
   }, [selectedFilterIndex])
 
   useEffect(() => {
-    const inputPath = previewContext.inputPath
-    if (!previewAvailable || !inputPath || previewContext.mediaInfo) return
-    if (!window.electronAPI?.ffmpeg?.probe) return
-
-    let cancelled = false
-    const runProbe = async () => {
-      try {
-        const result = await window.electronAPI.ffmpeg.probe({ inputPath })
-        if (cancelled || !result.success || !result.info) return
-        const state = useFfmpegBpmnStore.getState()
-        state.setMediaInfo(result.info)
-        await state.refreshPreview(0)
-      } catch {
-        // 探测失败时时间轴仍可用默认时长
-      }
-    }
-
-    runProbe()
-    return () => { cancelled = true }
-  }, [previewContext.inputPath, previewContext.mediaInfo, previewAvailable])
-
-  useEffect(() => {
     if (ffmpegConfig.action !== 'crop' || !previewContext.mediaInfo || ffmpegConfig.crop) return
     const width = previewContext.mediaInfo.width || 1920
     const height = previewContext.mediaInfo.height || 1080
@@ -255,10 +286,11 @@ const FfmpegPropertiesPanel: React.FC = () => {
       const pending = useFfmpegBpmnStore.getState().pendingFfmpegConfigs[element.id]
       const modeler = useFfmpegBpmnStore.getState().modelerRef
 
+      const loadedConfig = pending || readFfmpegConfigFromElement(modeler, element.id, element.businessObject)
       setFfmpegConfig(
-
-        pending || readFfmpegConfigFromElement(modeler, element.id, element.businessObject)
-
+        loadedConfig.action === 'probe'
+          ? { ...DEFAULT_FFMPEG_CONFIG, input: { source: 'input' } }
+          : loadedConfig
       )
 
     } else {
@@ -376,6 +408,15 @@ const FfmpegPropertiesPanel: React.FC = () => {
         delete next.filters
         next.video = { codec: 'libopenh264', preset: 'medium' }
         next.audio = { codec: 'aac' }
+      } else if (action === 'concat') {
+        delete next.filters
+        delete next.trim
+        delete next.crop
+        delete next.cropAdvanced
+        next.input = { source: 'merge' }
+        next.concat = { ...DEFAULT_FFMPEG_CONCAT_COPY }
+        delete next.video
+        delete next.audio
       }
 
       return next
@@ -445,6 +486,25 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
     setHasChanges(true)
 
+  }
+
+  const updateConcat = (patch: Partial<NonNullable<FfmpegJobConfig['concat']>>) => {
+    setFfmpegConfig(prev => {
+      const nextMode = patch.mode ?? prev.concat?.mode ?? 'copy'
+      const next: FfmpegJobConfig = {
+        ...prev,
+        concat: { ...prev.concat, ...patch, mode: nextMode }
+      }
+      if (nextMode === 'xfade') {
+        next.video = next.video || { codec: 'libopenh264', crf: 23, preset: 'medium' }
+        next.audio = next.audio || { codec: 'aac', bitrate: '128k' }
+      } else {
+        delete next.video
+        delete next.audio
+      }
+      return next
+    })
+    setHasChanges(true)
   }
 
 
@@ -1299,6 +1359,107 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
         )
 
+      case 'concat':
+        return (
+          <>
+            {!mergeAllowed && (
+              <p className="ffmpeg-props__hint">
+                合并操作需要先连接 ParallelGateway（Join），且上游至少 2 个 ServiceTask 分支。
+              </p>
+            )}
+            <label className="ffmpeg-props__field">
+              <span>合并模式</span>
+              <select
+                value={ffmpegConfig.concat?.mode || 'copy'}
+                onChange={e => updateConcat({ mode: e.target.value as 'copy' | 'xfade' })}
+              >
+                <option value="copy">直接拼接 (copy)</option>
+                <option value="xfade">交叉淡化 (重编码)</option>
+              </select>
+            </label>
+            {upstreamBranchIds.length > 0 && (
+              <div className="ffmpeg-props__field">
+                <span>上游分支（自动识别）</span>
+                <ul className="ffmpeg-props__branch-list">
+                  {upstreamBranchIds.map(branchId => {
+                    const branchTask = workflowGraph?.tasks.find(task => task.id === branchId)
+                    return (
+                      <li key={branchId}>{branchTask?.name || branchId}</li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+            {ffmpegConfig.concat?.mode === 'xfade' && (
+              <>
+                <label className="ffmpeg-props__field">
+                  <span>转场效果</span>
+                  <input
+                    value={ffmpegConfig.concat?.transition || 'fade'}
+                    onChange={e => updateConcat({ transition: e.target.value })}
+                  />
+                </label>
+                <label className="ffmpeg-props__field">
+                  <span>转场时长 (秒)</span>
+                  <input
+                    type="number"
+                    min={0.1}
+                    step={0.1}
+                    value={ffmpegConfig.concat?.duration ?? 0.5}
+                    onChange={e => updateConcat({ duration: Number(e.target.value) || 0.5 })}
+                  />
+                </label>
+                <label className="ffmpeg-props__field">
+                  <span>归一化帧率</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={ffmpegConfig.concat?.fps ?? 30}
+                    onChange={e => updateConcat({ fps: Number(e.target.value) || 30 })}
+                  />
+                </label>
+                <label className="ffmpeg-props__field">
+                  <span>视频编码</span>
+                  <select
+                    value={String(ffmpegConfig.video?.codec ?? 'libopenh264')}
+                    onChange={e => updateVideo({ codec: e.target.value })}
+                  >
+                    {VIDEO_CODEC_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="ffmpeg-props__field">
+                  <span>CRF</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={51}
+                    value={ffmpegConfig.video?.crf ?? 23}
+                    onChange={e => updateVideo({ crf: Number(e.target.value) })}
+                  />
+                </label>
+                <label className="ffmpeg-props__field">
+                  <span>预设</span>
+                  <select
+                    value={String(ffmpegConfig.video?.preset ?? 'medium')}
+                    onChange={e => updateVideo({ preset: e.target.value })}
+                  >
+                    {PRESET_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
+            {ffmpegConfig.concat?.mode !== 'xfade' && (
+              <p className="ffmpeg-props__hint">
+                copy 模式要求各分支编码/分辨率/帧率一致，不一致时将报错。
+              </p>
+            )}
+          </>
+        )
+
       case 'custom':
 
         return (
@@ -1676,9 +1837,9 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
           <PreviewSourceBar
 
-            inputPath={previewContext.inputPath}
+            inputPath={previewSource.inputPath}
 
-            mediaInfo={previewContext.mediaInfo}
+            mediaInfo={previewSource.mediaInfo}
 
             previewLoading={previewContext.previewLoading}
 
@@ -1687,6 +1848,16 @@ const FfmpegPropertiesPanel: React.FC = () => {
             previewFrameTime={previewContext.previewFrameTime}
 
             previewAvailable={previewAvailable}
+
+            previewTaskLabel={
+              selectedElement?.id && entryTaskIds.has(selectedElement.id)
+                ? (selectedElement.name || selectedElement.id)
+                : null
+            }
+
+            entryProbing={activeEntryState?.probing}
+
+            entryError={activeEntryState?.error}
 
             onRefreshPreview={handleSeekPreview}
 
@@ -1706,7 +1877,7 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
             >
 
-              {ACTIONS.map(action => (
+              {availableActions.map(action => (
 
                 <option key={action} value={action}>{FFMPEG_OPERATION_LABELS[action]}</option>
 
@@ -1718,6 +1889,7 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
 
 
+          {ffmpegConfig.action !== 'concat' && (
           <label className="ffmpeg-props__field">
 
             <span>输入 input.source</span>
@@ -1739,62 +1911,59 @@ const FfmpegPropertiesPanel: React.FC = () => {
             </select>
 
           </label>
-
-
-
-          {ffmpegConfig.action !== 'probe' && (
-
-            <>
-
-              <label className="ffmpeg-props__field">
-
-                <span>输出格式 output.format</span>
-
-                <input
-
-                  value={ffmpegConfig.output?.format || 'mp4'}
-
-                  onChange={e => updateOutput({ format: e.target.value })}
-
-                />
-
-              </label>
-
-              <label className="ffmpeg-props__field">
-
-                <span>输出变量 output.var</span>
-
-                <input
-
-                  value={ffmpegConfig.output?.var || ''}
-
-                  onChange={e => updateOutput({ var: e.target.value })}
-
-                  placeholder={`${selectedElement.id}.output`}
-
-                />
-
-              </label>
-
-              <label className="ffmpeg-props__field ffmpeg-props__field--row">
-
-                <input
-
-                  type="checkbox"
-
-                  checked={ffmpegConfig.output?.overwrite !== false}
-
-                  onChange={e => updateOutput({ overwrite: e.target.checked })}
-
-                />
-
-                <span>覆盖输出 overwrite</span>
-
-              </label>
-
-            </>
-
           )}
+
+
+
+          <>
+
+            <label className="ffmpeg-props__field">
+
+              <span>输出格式 output.format</span>
+
+              <input
+
+                value={ffmpegConfig.output?.format || 'mp4'}
+
+                onChange={e => updateOutput({ format: e.target.value })}
+
+              />
+
+            </label>
+
+            <label className="ffmpeg-props__field">
+
+              <span>输出变量 output.var</span>
+
+              <input
+
+                value={ffmpegConfig.output?.var || ''}
+
+                onChange={e => updateOutput({ var: e.target.value })}
+
+                placeholder={`${selectedElement.id}.output`}
+
+              />
+
+            </label>
+
+            <label className="ffmpeg-props__field ffmpeg-props__field--row">
+
+              <input
+
+                type="checkbox"
+
+                checked={ffmpegConfig.output?.overwrite !== false}
+
+                onChange={e => updateOutput({ overwrite: e.target.checked })}
+
+              />
+
+              <span>覆盖输出 overwrite</span>
+
+            </label>
+
+          </>
 
 
 

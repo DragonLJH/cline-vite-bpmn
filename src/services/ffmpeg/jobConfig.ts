@@ -1,5 +1,7 @@
 export {
   DEFAULT_FFMPEG_JOB_CONFIG,
+  DEFAULT_FFMPEG_CONCAT_COPY,
+  DEFAULT_FFMPEG_CONCAT_XFADE,
   FFMPEG_ACTION_LABELS,
   getJobOutputFormat,
   getJobOutputVar,
@@ -16,6 +18,7 @@ export type {
   FfmpegDrawtextFilter,
   FfmpegJobAction,
   FfmpegJobAudio,
+  FfmpegJobConcat,
   FfmpegJobConfig,
   FfmpegJobFilter,
   FfmpegJobGlobal,

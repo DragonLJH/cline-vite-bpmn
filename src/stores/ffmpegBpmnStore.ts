@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type { ProcessDefinition, BpmnElement, BpmnHistory, FfmpegJobConfig, MediaInfo } from '../types/bpmn'
 import { DEFAULT_BPMN_XML as FFMPEG_DEFAULT_BPMN_XML } from '../services/ffmpeg/defaultTemplate'
+import { migrateProbeNodesFromBpmnXml } from '../services/ffmpeg/probeNodeMigration'
+import type { WorkflowEntryPayload } from '../services/ffmpeg/workflowRunner'
 import { formatSecondsToFfmpegTime } from '../services/ffmpeg/timeUtils'
 import { readPreviewAsDataUrl } from '../services/ffmpeg/previewUtils'
 
@@ -8,9 +10,25 @@ const DEFAULT_BPMN_XML = FFMPEG_DEFAULT_BPMN_XML
 
 export type FfmpegPageTab = 'designer' | 'xml' | 'nodes' | 'execute'
 
+export interface EntryInputState {
+  path: string | null
+  mediaInfo: MediaInfo | null
+  probing: boolean
+  error: string | null
+}
+
+export const DEFAULT_ENTRY_INPUT_STATE: EntryInputState = {
+  path: null,
+  mediaInfo: null,
+  probing: false,
+  error: null
+}
+
 export interface PreviewContext {
   inputPath: string | null
   mediaInfo: MediaInfo | null
+  entryInputs: Record<string, EntryInputState>
+  activePreviewTaskId: string | null
   previewFramePath: string | null
   previewFrameDataUrl: string | null
   previewFrameTime: number
@@ -22,12 +40,25 @@ export interface PreviewContext {
 const DEFAULT_PREVIEW_CONTEXT: PreviewContext = {
   inputPath: null,
   mediaInfo: null,
+  entryInputs: {},
+  activePreviewTaskId: null,
   previewFramePath: null,
   previewFrameDataUrl: null,
   previewFrameTime: 0,
   previewMode: 'none',
   previewLoading: false,
   previewError: null
+}
+
+function mirrorSingleEntryPreview(entryInputs: Record<string, EntryInputState>, taskIds: string[]) {
+  if (taskIds.length !== 1) {
+    return { inputPath: null as string | null, mediaInfo: null as MediaInfo | null }
+  }
+  const state = entryInputs[taskIds[0]]
+  return {
+    inputPath: state?.path ?? null,
+    mediaInfo: state?.mediaInfo ?? null
+  }
 }
 
 interface FfmpegBpmnState {
@@ -75,6 +106,14 @@ interface FfmpegBpmnState {
   getPendingFfmpegConfigs: () => Record<string, FfmpegJobConfig>
   setInputPath: (path: string | null) => void
   setMediaInfo: (info: MediaInfo | null) => void
+  reconcileEntryInputs: (entryTaskIds: string[]) => void
+  setEntryInputPath: (taskId: string, path: string | null) => void
+  setEntryMediaInfo: (taskId: string, info: MediaInfo | null) => void
+  setEntryProbing: (taskId: string, probing: boolean) => void
+  setEntryInputError: (taskId: string, error: string | null) => void
+  setActivePreviewTaskId: (taskId: string | null) => void
+  getEntryInputsForRun: () => Record<string, WorkflowEntryPayload>
+  getPreviewSourceForTask: (taskId: string | null) => { inputPath: string | null; mediaInfo: MediaInfo | null }
   setPreviewFrame: (path: string | null, time: number, dataUrl?: string | null) => void
   setPreviewMode: (mode: PreviewContext['previewMode']) => void
   clearPreviewContext: () => void
@@ -122,7 +161,13 @@ export const useFfmpegBpmnStore = create<FfmpegBpmnState>((set, get) => ({
   })),
 
   setCurrentProcessId: (id) => set({ currentProcessId: id }),
-  setBpmnXml: (xml) => set({ bpmnXml: xml }),
+  setBpmnXml: (xml) => {
+    const { xml: migratedXml, migrated } = migrateProbeNodesFromBpmnXml(xml)
+    set((state) => ({
+      bpmnXml: migratedXml,
+      hasUnsavedChanges: migrated ? true : state.hasUnsavedChanges
+    }))
+  },
   setBpmnXmlFromModeler: (xml) => set((state) => ({
     bpmnXml: xml,
     modelerXmlSyncToken: state.modelerXmlSyncToken + 1
@@ -149,15 +194,16 @@ export const useFfmpegBpmnStore = create<FfmpegBpmnState>((set, get) => ({
     if (state.history.undoStack.length === 0) return null
 
     const previousXml = state.history.undoStack[state.history.undoStack.length - 1]
+    const { xml: migratedXml } = migrateProbeNodesFromBpmnXml(previousXml)
     set({
       history: {
         ...state.history,
         undoStack: state.history.undoStack.slice(0, -1),
         redoStack: [...state.history.redoStack, state.bpmnXml]
       },
-      bpmnXml: previousXml
+      bpmnXml: migratedXml
     })
-    return previousXml
+    return migratedXml
   },
 
   redo: () => {
@@ -165,15 +211,16 @@ export const useFfmpegBpmnStore = create<FfmpegBpmnState>((set, get) => ({
     if (state.history.redoStack.length === 0) return null
 
     const nextXml = state.history.redoStack[state.history.redoStack.length - 1]
+    const { xml: migratedXml } = migrateProbeNodesFromBpmnXml(nextXml)
     set({
       history: {
         ...state.history,
         redoStack: state.history.redoStack.slice(0, -1),
         undoStack: [...state.history.undoStack, state.bpmnXml]
       },
-      bpmnXml: nextXml
+      bpmnXml: migratedXml
     })
-    return nextXml
+    return migratedXml
   },
 
   clearHistory: () => set({
@@ -260,6 +307,145 @@ export const useFfmpegBpmnStore = create<FfmpegBpmnState>((set, get) => ({
     previewContext: { ...state.previewContext, mediaInfo: info }
   })),
 
+  reconcileEntryInputs: (entryTaskIds) => set((state) => {
+    const nextEntryInputs: Record<string, EntryInputState> = {}
+    entryTaskIds.forEach(taskId => {
+      nextEntryInputs[taskId] = state.previewContext.entryInputs[taskId] || { ...DEFAULT_ENTRY_INPUT_STATE }
+    })
+    const mirrored = mirrorSingleEntryPreview(nextEntryInputs, entryTaskIds)
+    const activePreviewTaskId = state.previewContext.activePreviewTaskId && nextEntryInputs[state.previewContext.activePreviewTaskId]
+      ? state.previewContext.activePreviewTaskId
+      : (entryTaskIds[0] ?? null)
+
+    return {
+      previewContext: {
+        ...state.previewContext,
+        entryInputs: nextEntryInputs,
+        activePreviewTaskId,
+        inputPath: mirrored.inputPath,
+        mediaInfo: mirrored.mediaInfo
+      }
+    }
+  }),
+
+  setEntryInputPath: (taskId, path) => set((state) => {
+    const entryInputs = {
+      ...state.previewContext.entryInputs,
+      [taskId]: {
+        ...(state.previewContext.entryInputs[taskId] || DEFAULT_ENTRY_INPUT_STATE),
+        path,
+        mediaInfo: path ? state.previewContext.entryInputs[taskId]?.mediaInfo ?? null : null,
+        error: null
+      }
+    }
+    const taskIds = Object.keys(entryInputs)
+    const mirrored = mirrorSingleEntryPreview(entryInputs, taskIds)
+
+    return {
+      previewContext: {
+        ...state.previewContext,
+        entryInputs,
+        inputPath: mirrored.inputPath,
+        mediaInfo: mirrored.mediaInfo,
+        previewFramePath: null,
+        previewFrameDataUrl: null
+      }
+    }
+  }),
+
+  setEntryMediaInfo: (taskId, info) => set((state) => {
+    const entryInputs = {
+      ...state.previewContext.entryInputs,
+      [taskId]: {
+        ...(state.previewContext.entryInputs[taskId] || DEFAULT_ENTRY_INPUT_STATE),
+        mediaInfo: info
+      }
+    }
+    const taskIds = Object.keys(entryInputs)
+    const mirrored = mirrorSingleEntryPreview(entryInputs, taskIds)
+    const activeId = state.previewContext.activePreviewTaskId
+    const activeMirrored = activeId && entryInputs[activeId]
+      ? { inputPath: entryInputs[activeId].path, mediaInfo: entryInputs[activeId].mediaInfo }
+      : mirrored
+
+    return {
+      previewContext: {
+        ...state.previewContext,
+        entryInputs,
+        inputPath: activeMirrored.inputPath,
+        mediaInfo: activeMirrored.mediaInfo
+      }
+    }
+  }),
+
+  setEntryProbing: (taskId, probing) => set((state) => ({
+    previewContext: {
+      ...state.previewContext,
+      entryInputs: {
+        ...state.previewContext.entryInputs,
+        [taskId]: {
+          ...(state.previewContext.entryInputs[taskId] || DEFAULT_ENTRY_INPUT_STATE),
+          probing
+        }
+      }
+    }
+  })),
+
+  setEntryInputError: (taskId, error) => set((state) => ({
+    previewContext: {
+      ...state.previewContext,
+      entryInputs: {
+        ...state.previewContext.entryInputs,
+        [taskId]: {
+          ...(state.previewContext.entryInputs[taskId] || DEFAULT_ENTRY_INPUT_STATE),
+          error
+        }
+      }
+    }
+  })),
+
+  setActivePreviewTaskId: (taskId) => set((state) => {
+    const entry = taskId ? state.previewContext.entryInputs[taskId] : null
+    return {
+      previewContext: {
+        ...state.previewContext,
+        activePreviewTaskId: taskId,
+        inputPath: entry?.path ?? state.previewContext.inputPath,
+        mediaInfo: entry?.mediaInfo ?? state.previewContext.mediaInfo,
+        previewFramePath: null,
+        previewFrameDataUrl: null
+      }
+    }
+  }),
+
+  getEntryInputsForRun: () => {
+    const { entryInputs } = get().previewContext
+    const result: Record<string, WorkflowEntryPayload> = {}
+    Object.entries(entryInputs).forEach(([taskId, state]) => {
+      if (state.path) {
+        result[taskId] = {
+          path: state.path,
+          mediaInfo: state.mediaInfo ?? undefined
+        }
+      }
+    })
+    return result
+  },
+
+  getPreviewSourceForTask: (taskId) => {
+    const { previewContext } = get()
+    if (taskId && previewContext.entryInputs[taskId]) {
+      return {
+        inputPath: previewContext.entryInputs[taskId].path,
+        mediaInfo: previewContext.entryInputs[taskId].mediaInfo
+      }
+    }
+    return {
+      inputPath: previewContext.inputPath,
+      mediaInfo: previewContext.mediaInfo
+    }
+  },
+
   setPreviewFrame: (path, time, dataUrl = null) => set((state) => ({
     previewContext: {
       ...state.previewContext,
@@ -282,7 +468,9 @@ export const useFfmpegBpmnStore = create<FfmpegBpmnState>((set, get) => ({
 
   refreshPreview: async (timeSeconds = 0) => {
     const { previewContext } = get()
-    const inputPath = previewContext.inputPath
+    const activeTaskId = previewContext.activePreviewTaskId
+    const previewSource = get().getPreviewSourceForTask(activeTaskId)
+    const inputPath = previewSource.inputPath
     if (!inputPath || !window.electronAPI?.ffmpeg?.snapshot) {
       set((state) => ({
         previewContext: {

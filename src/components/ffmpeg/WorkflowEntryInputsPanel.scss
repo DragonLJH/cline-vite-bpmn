@@ -1,0 +1,109 @@
+.workflow-entry-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workflow-entry-inputs--empty {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.workflow-entry-inputs__hint {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 13px;
+}
+
+.workflow-entry-inputs__row {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.workflow-entry-inputs__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workflow-entry-inputs__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workflow-entry-inputs__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.workflow-entry-inputs__path {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.workflow-entry-inputs__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.workflow-entry-inputs__btn {
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.workflow-entry-inputs__btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.workflow-entry-inputs__btn--secondary {
+  background: #f3f4f6;
+}
+
+.workflow-entry-inputs__meta,
+.workflow-entry-inputs__error {
+  grid-column: 1 / -1;
+  font-size: 12px;
+}
+
+.workflow-entry-inputs__meta {
+  color: #6b7280;
+}
+
+.workflow-entry-inputs__error {
+  color: #b91c1c;
+}
+
+.workflow-entry-inputs__footer {
+  display: flex;
+  justify-content: flex-end;
+}

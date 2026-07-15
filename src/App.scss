@@ -52,14 +52,14 @@ p {
   color: #6c757d;
 }
 
-a {
-  color: #007bff;
+.main-content a {
+  color: #475569;
   text-decoration: none;
   transition: color 0.2s;
 }
 
-a:hover {
-  color: #0056b3;
+.main-content a:hover {
+  color: #1e293b;
   text-decoration: underline;
 }
 

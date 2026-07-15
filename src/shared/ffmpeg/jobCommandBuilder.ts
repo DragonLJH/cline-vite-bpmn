@@ -1,4 +1,5 @@
 import type { FfmpegJobConfig, FfmpegJobFilter } from './jobConfig'
+import { buildXfadeJobArgs, isXfadeConcatMode } from './xfadeCommandBuilder'
 import {
   buildCropSegments,
   buildKeyframeCropFilterComplex,
@@ -222,11 +223,25 @@ function appendCropOutputArgs(
   }
 }
 
+export interface BuildJobCommandOptions {
+  inputPaths?: string[]
+  segmentDurations?: number[]
+  segmentHasAudio?: boolean[]
+  targetSize?: { width: number; height: number }
+}
+
+function buildGlobalArgsPrefix(config: FfmpegJobConfig, includeOverwrite = true): string[] {
+  const args: string[] = []
+  appendGlobalArgs(args, config, { includeOverwrite })
+  return args
+}
+
 export function buildJobCommand(
   config: FfmpegJobConfig,
   inputPath: string,
   outputPath?: string,
-  resolvedImages: string[] = []
+  resolvedImages: string[] = [],
+  options: BuildJobCommandOptions = {}
 ): string[] {
   const args: string[] = []
 
@@ -260,11 +275,26 @@ export function buildJobCommand(
       if (outputPath) args.push(outputPath)
       return args
 
-    case 'concat':
+    case 'concat': {
+      if (isXfadeConcatMode(config) && options.inputPaths?.length) {
+        return buildXfadeJobArgs(
+          config,
+          {
+            inputPaths: options.inputPaths,
+            segmentDurations: options.segmentDurations || options.inputPaths.map(() => 10),
+            segmentHasAudio: options.segmentHasAudio,
+            targetSize: options.targetSize
+          },
+          outputPath,
+          buildGlobalArgsPrefix(config)
+        )
+      }
+
       appendGlobalArgs(args, config)
       args.push('-f', 'concat', '-safe', '0', '-i', inputPath, '-c', 'copy')
       if (outputPath) args.push(outputPath)
       return args
+    }
 
     case 'custom':
       appendGlobalArgs(args, config)
@@ -356,24 +386,33 @@ export function buildJobCommand(
 export function previewJobCommand(
   config: FfmpegJobConfig,
   inputPath: string = '/path/to/input.mp4',
-  outputPath: string = '/path/to/output.mp4'
+  outputPath: string = '/path/to/output.mp4',
+  overlayImages: string[] = [],
+  options: BuildJobCommandOptions = {}
 ): string {
   const ext = config.output?.format || 'mp4'
   const resolvedOutput = config.action === 'probe'
     ? outputPath
     : outputPath.replace(/\.\w+$/, `.${ext}`)
 
-  const overlayImages = config.action === 'watermark'
-    ? (config.filters || [])
-      .filter((filter): filter is Extract<FfmpegJobFilter, { type: 'overlay' }> => filter.type === 'overlay')
-      .map(filter => filter.image || '/path/to/watermark.png')
-    : []
+  const resolvedOverlayImages = overlayImages.length > 0
+    ? overlayImages
+    : config.action === 'watermark'
+      ? (config.filters || [])
+        .filter((filter): filter is Extract<FfmpegJobFilter, { type: 'overlay' }> => filter.type === 'overlay')
+        .map(filter => filter.image || '/path/to/watermark.png')
+      : []
+
+  const previewInputPath = config.action === 'concat' && isXfadeConcatMode(config) && options.inputPaths?.length
+    ? options.inputPaths[0]
+    : inputPath
 
   const args = buildJobCommand(
     config,
-    inputPath,
+    previewInputPath,
     config.action === 'probe' ? undefined : resolvedOutput,
-    overlayImages
+    resolvedOverlayImages,
+    options
   )
 
   return `ffmpeg ${formatFfmpegCommandPreview(args)}`

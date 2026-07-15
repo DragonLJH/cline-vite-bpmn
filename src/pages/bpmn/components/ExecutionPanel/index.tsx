@@ -1,9 +1,13 @@
-import React, { useState, useMemo, useCallback } from 'react'
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { usePageBpmnStore, usePageBpmnStoreHook } from '../../../../contexts/BpmnStoreContext'
 import { parseWorkflowGraph } from '../../../../utils/bpmnParser'
 import { runWorkflow, getWorkflowSummary, FFMPEG_OPERATION_LABELS } from '../../../../services/ffmpeg'
-import type { WorkflowStepResult } from '../../../../services/ffmpeg'
+import { collectEntryInputTasks } from '../../../../shared/ffmpeg/mergeInputs'
+import type { WorkflowStepResult, WorkflowEntryPayload } from '../../../../services/ffmpeg/workflowRunner'
 import type { FfmpegJobConfig, MediaInfo } from '../../../../types/bpmn'
+import type { EntryInputState } from '../../../../stores/ffmpegBpmnStore'
+import { DEFAULT_ENTRY_INPUT_STATE } from '../../../../stores/ffmpegBpmnStore'
+import WorkflowEntryInputsPanel from '../../../../components/ffmpeg/WorkflowEntryInputsPanel'
 import Icon from '../../../../components/Icon'
 import './index.scss'
 
@@ -15,7 +19,14 @@ type PreviewStoreSlice = {
   previewContext?: {
     inputPath: string | null
     mediaInfo: MediaInfo | null
+    entryInputs?: Record<string, EntryInputState>
   }
+  reconcileEntryInputs?: (entryTaskIds: string[]) => void
+  setEntryInputPath?: (taskId: string, path: string | null) => void
+  setEntryMediaInfo?: (taskId: string, info: MediaInfo | null) => void
+  setEntryProbing?: (taskId: string, probing: boolean) => void
+  setEntryInputError?: (taskId: string, error: string | null) => void
+  getEntryInputsForRun?: () => Record<string, WorkflowEntryPayload>
   setInputPath?: (path: string | null) => void
   setMediaInfo?: (info: MediaInfo | null) => void
   refreshPreview?: (timeSeconds?: number) => Promise<void>
@@ -29,111 +40,260 @@ const STATUS_LABELS: Record<string, string> = {
   skipped: '跳过'
 }
 
+function reconcileLocalEntryInputs(
+  prev: Record<string, EntryInputState>,
+  entryTaskIds: string[]
+): Record<string, EntryInputState> {
+  const next: Record<string, EntryInputState> = {}
+  entryTaskIds.forEach(taskId => {
+    next[taskId] = prev[taskId] || { ...DEFAULT_ENTRY_INPUT_STATE }
+  })
+  return next
+}
+
+function isEntryReady(state: EntryInputState | undefined): boolean {
+  return Boolean(state?.path && state.mediaInfo && !state.probing && !state.error)
+}
+
 const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ className }) => {
   const useStore = usePageBpmnStoreHook()
   const { bpmnXml } = usePageBpmnStore()
   const storeSlice = useStore() as PreviewStoreSlice
-  const hasPreviewStore = Boolean(storeSlice.setInputPath)
+  const hasPreviewStore = Boolean(storeSlice.reconcileEntryInputs)
 
-  const [localInputPath, setLocalInputPath] = useState('')
-  const [localMediaInfo, setLocalMediaInfo] = useState<MediaInfo | null>(null)
-  const [probing, setProbing] = useState(false)
+  const [localEntryInputs, setLocalEntryInputs] = useState<Record<string, EntryInputState>>({})
+  const [selectingTaskId, setSelectingTaskId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [steps, setSteps] = useState<WorkflowStepResult[]>([])
   const [runError, setRunError] = useState<string | null>(null)
-
-  const inputPath = hasPreviewStore
-    ? (storeSlice.previewContext?.inputPath || '')
-    : localInputPath
-  const mediaInfo = hasPreviewStore
-    ? (storeSlice.previewContext?.mediaInfo || null)
-    : localMediaInfo
+  const probeEntryRef = useRef<(taskId: string, pathOverride?: string) => Promise<boolean>>(async () => false)
 
   const workflowGraph = useMemo(() => parseWorkflowGraph(bpmnXml), [bpmnXml])
+  const entryTasks = useMemo(
+    () => (workflowGraph ? collectEntryInputTasks(workflowGraph) : []),
+    [workflowGraph]
+  )
   const workflowSummary = useMemo(() => getWorkflowSummary(workflowGraph), [workflowGraph])
 
-  const handleSelectInput = useCallback(async () => {
+  const entryInputs = hasPreviewStore
+    ? (storeSlice.previewContext?.entryInputs || {})
+    : localEntryInputs
+
+  useEffect(() => {
+    const taskIds = entryTasks.map(task => task.id)
+    if (hasPreviewStore) {
+      storeSlice.reconcileEntryInputs?.(taskIds)
+    } else {
+      setLocalEntryInputs(prev => reconcileLocalEntryInputs(prev, taskIds))
+    }
+  }, [entryTasks, hasPreviewStore, storeSlice.reconcileEntryInputs])
+
+  const allEntryInputsReady = entryTasks.length > 0
+    && entryTasks.every(task => isEntryReady(entryInputs[task.id]))
+
+  const anyEntryProbing = entryTasks.some(task => {
+    const state = entryInputs[task.id]
+    return Boolean(state?.probing || selectingTaskId === task.id)
+  })
+
+  const resolveEntryInputsForRun = useCallback((): Record<string, WorkflowEntryPayload> | null => {
+    if (entryTasks.length === 0) return null
+
+    if (hasPreviewStore && storeSlice.getEntryInputsForRun) {
+      return storeSlice.getEntryInputsForRun()
+    }
+
+    const result: Record<string, WorkflowEntryPayload> = {}
+    entryTasks.forEach(task => {
+      const state = localEntryInputs[task.id]
+      if (state?.path) {
+        result[task.id] = {
+          path: state.path,
+          mediaInfo: state.mediaInfo ?? undefined
+        }
+      }
+    })
+    return result
+  }, [entryTasks, hasPreviewStore, localEntryInputs, storeSlice.getEntryInputsForRun])
+
+  const handleProbeEntry = useCallback(async (taskId: string, pathOverride?: string): Promise<boolean> => {
+    const path = pathOverride || entryInputs[taskId]?.path
+    if (!path || !window.electronAPI?.ffmpeg) return false
+
+    if (hasPreviewStore) {
+      useStore.getState().setEntryProbing?.(taskId, true)
+    } else {
+      setLocalEntryInputs(prev => ({
+        ...prev,
+        [taskId]: { ...(prev[taskId] || DEFAULT_ENTRY_INPUT_STATE), probing: true, error: null }
+      }))
+    }
+
+    try {
+      const result = await window.electronAPI.ffmpeg.probe({ inputPath: path })
+      if (result.success && result.info) {
+        if (hasPreviewStore) {
+          const state = useStore.getState() as PreviewStoreSlice
+          state.setEntryMediaInfo?.(taskId, result.info)
+          state.setEntryInputError?.(taskId, null)
+          if (entryTasks.length === 1) {
+            await state.refreshPreview?.(0)
+          }
+        } else {
+          setLocalEntryInputs(prev => ({
+            ...prev,
+            [taskId]: {
+              ...(prev[taskId] || DEFAULT_ENTRY_INPUT_STATE),
+              mediaInfo: result.info || null,
+              probing: false,
+              error: null
+            }
+          }))
+        }
+        return true
+      }
+
+      const message = result.error || '探测失败'
+      if (hasPreviewStore) {
+        useStore.getState().setEntryMediaInfo?.(taskId, null)
+        useStore.getState().setEntryInputError?.(taskId, message)
+      } else {
+        setLocalEntryInputs(prev => ({
+          ...prev,
+          [taskId]: {
+            ...(prev[taskId] || DEFAULT_ENTRY_INPUT_STATE),
+            mediaInfo: null,
+            probing: false,
+            error: message
+          }
+        }))
+      }
+      return false
+    } catch (error) {
+      const message = (error as Error).message
+      if (hasPreviewStore) {
+        useStore.getState().setEntryInputError?.(taskId, message)
+      } else {
+        setLocalEntryInputs(prev => ({
+          ...prev,
+          [taskId]: {
+            ...(prev[taskId] || DEFAULT_ENTRY_INPUT_STATE),
+            probing: false,
+            error: message
+          }
+        }))
+      }
+      return false
+    } finally {
+      if (hasPreviewStore) {
+        useStore.getState().setEntryProbing?.(taskId, false)
+      } else {
+        setLocalEntryInputs(prev => ({
+          ...prev,
+          [taskId]: { ...(prev[taskId] || DEFAULT_ENTRY_INPUT_STATE), probing: false }
+        }))
+      }
+    }
+  }, [entryInputs, entryTasks.length, hasPreviewStore, useStore])
+
+  probeEntryRef.current = handleProbeEntry
+
+  const handleSelectEntryFile = useCallback(async (taskId: string) => {
     if (!window.electronAPI) {
       setRunError('请在 Electron 环境中运行')
       return
     }
 
-    const paths = await window.electronAPI.openFileDialog({
-      title: '选择输入视频',
-      filters: [
-        { name: '视频文件', extensions: ['mp4', 'mkv', 'avi', 'mov', 'webm', 'flv'] },
-        { name: '所有文件', extensions: ['*'] }
-      ],
-      properties: ['openFile']
-    })
-
-    if (paths && paths.length > 0) {
-      const selectedPath = paths[0]
-      if (hasPreviewStore) {
-        const state = useStore.getState()
-        state.setInputPath?.(selectedPath)
-        state.setMediaInfo?.(null)
-        setRunError(null)
-        if (window.electronAPI?.ffmpeg?.probe) {
-          setProbing(true)
-          try {
-            const result = await window.electronAPI.ffmpeg.probe({ inputPath: selectedPath })
-            if (result.success && result.info) {
-              state.setMediaInfo?.(result.info)
-              await state.refreshPreview?.(0)
-            } else {
-              setRunError(result.error || '探测失败')
-            }
-          } catch (error) {
-            setRunError((error as Error).message)
-          } finally {
-            setProbing(false)
-          }
-        }
-      } else {
-        setLocalInputPath(selectedPath)
-        setLocalMediaInfo(null)
-        setRunError(null)
-      }
-    }
-  }, [hasPreviewStore, useStore])
-
-  const handleProbeInput = useCallback(async () => {
-    if (!inputPath || !window.electronAPI?.ffmpeg) return
-
-    setProbing(true)
+    const task = entryTasks.find(item => item.id === taskId)
+    setSelectingTaskId(taskId)
     setRunError(null)
 
     try {
-      const result = await window.electronAPI.ffmpeg.probe({ inputPath })
-      console.log('[ExecutionPanel] 探测命令: ffmpeg -hide_banner -i', inputPath)
-      console.log('[ExecutionPanel] 探测结果:', result)
-      if (result.success && result.info) {
-        if (hasPreviewStore) {
-          const state = useStore.getState()
-          state.setMediaInfo?.(result.info)
-          await state.refreshPreview?.(0)
-        } else {
-          setLocalMediaInfo(result.info)
-        }
+      const paths = await window.electronAPI.openFileDialog({
+        title: `选择输入视频 - ${task?.name || taskId}`,
+        filters: [
+          { name: '视频文件', extensions: ['mp4', 'mkv', 'avi', 'mov', 'webm', 'flv'] },
+          { name: '所有文件', extensions: ['*'] }
+        ],
+        properties: ['openFile']
+      })
+
+      if (!paths || paths.length === 0) return
+
+      const selectedPath = paths[0]
+      if (hasPreviewStore) {
+        const state = useStore.getState() as PreviewStoreSlice
+        state.setEntryInputPath?.(taskId, selectedPath)
+        state.setEntryMediaInfo?.(taskId, null)
+        state.setEntryInputError?.(taskId, null)
       } else {
-        setRunError(result.error || '探测失败')
-        if (hasPreviewStore) {
-          useStore.getState().setMediaInfo?.(null)
-        } else {
-          setLocalMediaInfo(null)
-        }
+        setLocalEntryInputs(prev => ({
+          ...prev,
+          [taskId]: {
+            ...(prev[taskId] || DEFAULT_ENTRY_INPUT_STATE),
+            path: selectedPath,
+            mediaInfo: null,
+            error: null
+          }
+        }))
       }
-    } catch (error) {
-      setRunError((error as Error).message)
+
+      const probeOk = await probeEntryRef.current(taskId, selectedPath)
+      if (!probeOk) {
+        const label = task?.name || taskId
+        setRunError(`「${label}」探测失败，请重新选择文件或检查文件是否有效`)
+      }
     } finally {
-      setProbing(false)
+      setSelectingTaskId(null)
     }
-  }, [inputPath, hasPreviewStore, useStore])
+  }, [entryTasks, hasPreviewStore, useStore])
+
+  const validateBeforeRun = useCallback((): string | null => {
+    const probing = entryTasks.find(task => {
+      const state = entryInputs[task.id]
+      return state?.probing || selectingTaskId === task.id
+    })
+    if (probing) {
+      return '正在探测媒体信息，请稍候…'
+    }
+
+    const missingFile = entryTasks.filter(task => !entryInputs[task.id]?.path)
+    if (missingFile.length > 0) {
+      return `以下入口尚未选择文件：${missingFile.map(task => task.name || task.id).join('、')}`
+    }
+
+    const probeFailed = entryTasks.filter(task => {
+      const state = entryInputs[task.id]
+      return state?.path && (!state.mediaInfo || state.error)
+    })
+    if (probeFailed.length > 0) {
+      const details = probeFailed.map(task => {
+        const state = entryInputs[task.id]
+        const label = task.name || task.id
+        return `「${label}」${state?.error || '探测未完成'}`
+      }).join('；')
+      return `无法运行工作流：${details}`
+    }
+
+    return null
+  }, [entryInputs, entryTasks, selectingTaskId])
 
   const handleRunWorkflow = useCallback(async () => {
-    if (!inputPath) {
-      setRunError('请先选择输入文件')
+    const validationError = validateBeforeRun()
+    if (validationError) {
+      setRunError(validationError)
+      return
+    }
+
+    const entryInputsForRun = resolveEntryInputsForRun()
+    if (!entryInputsForRun) {
+      setRunError('工作流中没有可执行的入口节点')
+      return
+    }
+
+    const missingMedia = entryTasks.filter(task => !entryInputsForRun[task.id]?.mediaInfo)
+    if (missingMedia.length > 0) {
+      setRunError(`以下入口尚未完成探测：${missingMedia.map(task => task.name || task.id).join('、')}`)
       return
     }
 
@@ -167,7 +327,7 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ className }) => {
       }
 
       const pendingConfigs = getPendingFfmpegConfigs?.()
-      const result = await runWorkflow(xmlToRun, inputPath, (step) => {
+      const result = await runWorkflow(xmlToRun, entryInputsForRun, (step) => {
         setSteps(prev => {
           const index = prev.findIndex(s => s.stepId === step.stepId)
           if (index >= 0) {
@@ -192,59 +352,21 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ className }) => {
     } finally {
       setRunning(false)
     }
-  }, [bpmnXml, inputPath, useStore])
-
-  const renderMediaInfo = () => {
-    if (!mediaInfo) return null
-
-    const items = [
-      { label: '时长', value: mediaInfo.duration || '-' },
-      { label: '分辨率', value: mediaInfo.width && mediaInfo.height ? `${mediaInfo.width}x${mediaInfo.height}` : '-' },
-      { label: '帧率', value: mediaInfo.fps ? `${mediaInfo.fps} fps` : '-' },
-      { label: '视频编码', value: mediaInfo.videoCodec || '-' },
-      { label: '音频编码', value: mediaInfo.audioCodec || '-' },
-      { label: '码率', value: mediaInfo.bitrate || '-' }
-    ]
-
-    return (
-      <div className="execution-panel__info-grid">
-        {items.map(item => (
-          <div key={item.label} className="execution-panel__info-item">
-            <div className="execution-panel__info-label">{item.label}</div>
-            <div className="execution-panel__info-value">{item.value}</div>
-          </div>
-        ))}
-      </div>
-    )
-  }
+  }, [bpmnXml, entryTasks, resolveEntryInputsForRun, useStore, validateBeforeRun])
 
   return (
     <div className={`execution-panel ${className || ''}`}>
       <div className="execution-panel__section">
-        <h3 className="execution-panel__title">输入文件</h3>
-        <div className="execution-panel__row">
-          <input
-            type="text"
-            className="execution-panel__input"
-            value={inputPath}
-            readOnly
-            placeholder="选择视频文件..."
-          />
-          <button
-            className="execution-panel__btn execution-panel__btn--secondary"
-            onClick={handleSelectInput}
-          >
-            选择文件
-          </button>
-          <button
-            className="execution-panel__btn execution-panel__btn--secondary"
-            onClick={handleProbeInput}
-            disabled={!inputPath || probing}
-          >
-            {probing ? '探测中...' : '探测信息'}
-          </button>
-        </div>
-        {renderMediaInfo()}
+        <h3 className="execution-panel__title">
+          输入文件{entryTasks.length > 1 ? `（${entryTasks.length} 个入口）` : ''}
+        </h3>
+        <WorkflowEntryInputsPanel
+          entryTasks={entryTasks}
+          entryInputs={entryInputs}
+          selectingTaskId={selectingTaskId}
+          onSelectFile={handleSelectEntryFile}
+          disabled={running}
+        />
         {runError && !running && steps.length === 0 && (
           <div className="execution-panel__error">{runError}</div>
         )}
@@ -257,7 +379,7 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ className }) => {
           <button
             className="execution-panel__btn execution-panel__btn--primary"
             onClick={handleRunWorkflow}
-            disabled={!inputPath || running || !workflowGraph?.executionOrder.length}
+            disabled={!allEntryInputsReady || anyEntryProbing || running || !workflowGraph?.executionOrder.length}
           >
             {running ? '执行中...' : '运行工作流'}
           </button>
@@ -317,7 +439,11 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ className }) => {
           !running && (
             <div className="execution-panel__empty">
               <Icon name="clock" size={24} />
-              <p>选择输入文件后点击「运行工作流」</p>
+              <p>
+                {entryTasks.length > 1
+                  ? '为每个入口选择文件（将自动探测），全部成功后点击「运行工作流」'
+                  : '选择输入文件（将自动探测）后点击「运行工作流」'}
+              </p>
             </div>
           )
         )}

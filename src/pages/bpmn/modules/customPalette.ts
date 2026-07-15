@@ -27,6 +27,11 @@ class FfmpegPaletteProvider extends PaletteProvider {
       create.start(event, shape)
     }
 
+    function createParallelGateway(event: Event) {
+      const shape = elementFactory.createShape({ type: 'bpmn:ParallelGateway' })
+      create.start(event, shape)
+    }
+
     filtered['create.service-task'] = {
       group: 'activity',
       className: 'bpmn-icon-service-task',
@@ -34,6 +39,16 @@ class FfmpegPaletteProvider extends PaletteProvider {
       action: {
         dragstart: createServiceTask,
         click: createServiceTask
+      }
+    }
+
+    filtered['create.parallel-gateway'] = {
+      group: 'gateway',
+      className: 'bpmn-icon-gateway-parallel',
+      title: '创建并行网关',
+      action: {
+        dragstart: createParallelGateway,
+        click: createParallelGateway
       }
     }
 

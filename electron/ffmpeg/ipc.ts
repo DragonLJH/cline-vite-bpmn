@@ -81,6 +81,12 @@ export function registerFfmpegIpcHandlers(): void {
       {
         duration: payload.duration,
         resolvedImages: payload.overlayImages,
+        commandOptions: {
+          inputPaths: payload.inputPaths,
+          segmentDurations: payload.segmentDurations,
+          segmentHasAudio: payload.segmentHasAudio,
+          targetSize: payload.targetSize
+        },
         onProgress: (data) => {
           sender.send('ffmpeg:progress', {
             taskId: data.taskId,
@@ -97,7 +103,13 @@ export function registerFfmpegIpcHandlers(): void {
         payload.config,
         payload.inputPath,
         payload.outputPath,
-        payload.overlayImages
+        payload.overlayImages,
+        {
+          inputPaths: payload.inputPaths,
+          segmentDurations: payload.segmentDurations,
+          segmentHasAudio: payload.segmentHasAudio,
+          targetSize: payload.targetSize
+        }
       )
       return { success: true, ...result }
     } catch (error) {

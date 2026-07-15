@@ -213,6 +213,58 @@ function parseDurationSeconds(duration: string | undefined): number | undefined 
   return Number.isFinite(asNumber) ? asNumber : undefined
 }
 
+const GRAPH_NODE_TYPES = [
+  'startEvent', 'endEvent', 'parallelGateway', 'exclusiveGateway',
+  'serviceTask', 'task', 'userTask', 'scriptTask'
+]
+
+function findNearestUpstreamServiceTask(
+  startNodeId: string,
+  taskIds: Set<string>,
+  reverseAdjacency: Map<string, string[]>
+): string | null {
+  const queue = [startNodeId]
+  const visited = new Set<string>()
+
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    if (visited.has(current)) continue
+    visited.add(current)
+    if (taskIds.has(current)) return current
+    queue.push(...(reverseAdjacency.get(current) || []))
+  }
+
+  return null
+}
+
+function buildJoinBarrierTasks(
+  joinGateways: string[],
+  taskIds: Set<string>,
+  reverseAdjacency: Map<string, string[]>
+): Map<string, string[]> {
+  const joinBarrierTasks = new Map<string, string[]>()
+
+  joinGateways.forEach(joinId => {
+    const barrierTasks: string[] = []
+    const directPreds = reverseAdjacency.get(joinId) || []
+
+    directPreds.forEach(predId => {
+      const taskId = taskIds.has(predId)
+        ? predId
+        : findNearestUpstreamServiceTask(predId, taskIds, reverseAdjacency)
+      if (taskId && !barrierTasks.includes(taskId)) {
+        barrierTasks.push(taskId)
+      }
+    })
+
+    if (barrierTasks.length > 0) {
+      joinBarrierTasks.set(joinId, barrierTasks)
+    }
+  })
+
+  return joinBarrierTasks
+}
+
 /**
  * 解析 FFmpeg 工作流图：收集 ServiceTask 配置并按 sequenceFlow 拓扑排序执行顺序。
  * 优先从 StartEvent 遍历（兼容旧流程），无开始节点时从入度为 0 的 ServiceTask 开始。
@@ -305,7 +357,40 @@ export function parseWorkflowGraph(xmlString: string): WorkflowGraph | null {
 
   if (executionOrder.length === 0) return null
 
-  return { processId, tasks, executionOrder }
+  const nodeTypes = new Map<string, string>()
+  GRAPH_NODE_TYPES.forEach(type => {
+    const elements = processElement.querySelectorAll(`bpmn\\:${type}, ${type}`)
+    elements.forEach(el => {
+      const id = el.getAttribute('id')
+      if (id) nodeTypes.set(id, `bpmn:${type}`)
+    })
+  })
+
+  const reverseAdjacency = new Map<string, string[]>()
+  flowElements.forEach(flow => {
+    const sourceRef = flow.getAttribute('sourceRef')
+    const targetRef = flow.getAttribute('targetRef')
+    if (!sourceRef || !targetRef) return
+    if (!reverseAdjacency.has(targetRef)) reverseAdjacency.set(targetRef, [])
+    reverseAdjacency.get(targetRef)!.push(sourceRef)
+  })
+
+  const joinGateways = [...nodeTypes.entries()]
+    .filter(([id, type]) => type === 'bpmn:parallelGateway')
+    .map(([id]) => id)
+    .filter(id => (reverseAdjacency.get(id) || []).length >= 2)
+
+  const joinBarrierTasks = buildJoinBarrierTasks(joinGateways, taskIds, reverseAdjacency)
+
+  return {
+    processId,
+    tasks,
+    executionOrder,
+    reverseAdjacency,
+    nodeTypes,
+    joinGateways,
+    joinBarrierTasks
+  }
 }
 
 export { parseDurationSeconds }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { RouteConfig } from '../../router'
+import './index.scss'
 
 interface AppTopProps {
   routes?: RouteConfig[]
@@ -82,7 +83,7 @@ const AppTop: React.FC<AppTopProps> = ({ routes = [] }) => {
 
   return (
     <div
-      className={`w-[260px] h-screen bg-gradient-to-b from-[#667eea] to-[#764ba2] text-white flex flex-col relative select-none flex-shrink-0 ${
+      className={`app-top w-[260px] h-screen bg-gradient-to-b from-slate-800 to-slate-900 text-white flex flex-col relative select-none flex-shrink-0 ${
         platform === 'win32' ? 'cursor-default' : ''
       }`}
     >
@@ -113,8 +114,8 @@ const AppTop: React.FC<AppTopProps> = ({ routes = [] }) => {
             <Link
               key={item.path}
               to={item.path}
-              className={`flex items-center py-2.5 px-3 text-white no-underline rounded-lg text-sm font-medium mb-1 transition-all duration-200 ${
-                location.pathname === item.path ? 'bg-white/20' : 'hover:bg-white/10'
+              className={`flex items-center py-2.5 px-3 no-underline rounded-lg text-sm font-medium mb-1 transition-all duration-200 ${
+                location.pathname === item.path ? 'app-top__nav-link--active' : 'hover:bg-white/10'
               }`}
               title={item.description}
             >

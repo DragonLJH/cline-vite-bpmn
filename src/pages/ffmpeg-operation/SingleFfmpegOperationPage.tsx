@@ -23,6 +23,7 @@ import {
 } from '../../shared/ffmpeg/cropKeyframes'
 import type { FfmpegJobCropKeyframe } from '../../services/ffmpeg'
 import { mergeMediaInfo } from '../ffmpeg-probe/mergeMediaInfo'
+import ProbeMediaInfoGrid, { type ProbeDisplayStatus } from '../ffmpeg-probe/ProbeMediaInfoGrid'
 import './index.scss'
 
 export interface FfmpegOperationPageSpec {

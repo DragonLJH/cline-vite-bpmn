@@ -90,6 +90,14 @@ export interface FfmpegJobCropAdvanced {
   durationSeconds?: number
 }
 
+export interface FfmpegJobConcat {
+  mode: 'copy' | 'xfade'
+  transition?: string
+  duration?: number
+  fps?: number
+  scaleTo?: string | 'first'
+}
+
 export interface FfmpegJobConfig {
   type: 'ffmpeg'
   action: FfmpegJobAction
@@ -102,6 +110,7 @@ export interface FfmpegJobConfig {
   trim?: FfmpegJobTrim
   crop?: FfmpegJobCrop
   cropAdvanced?: FfmpegJobCropAdvanced
+  concat?: FfmpegJobConcat
   args?: string[]
 }
 
@@ -112,6 +121,16 @@ export interface LegacyFfmpegTaskConfig {
   outputVar?: string
   params?: Record<string, unknown>
   args?: string[]
+}
+
+export const DEFAULT_FFMPEG_CONCAT_COPY: FfmpegJobConcat = { mode: 'copy' }
+
+export const DEFAULT_FFMPEG_CONCAT_XFADE: FfmpegJobConcat = {
+  mode: 'xfade',
+  transition: 'fade',
+  duration: 0.5,
+  fps: 30,
+  scaleTo: 'first'
 }
 
 export const DEFAULT_FFMPEG_JOB_CONFIG: FfmpegJobConfig = {
@@ -325,6 +344,24 @@ function mergeJobConfig(parsed: Partial<FfmpegJobConfig>): FfmpegJobConfig {
     merged.args = [...parsed.args]
   }
 
+  if (parsed.args) {
+    merged.args = [...parsed.args]
+  }
+  if (parsed.concat) {
+    merged.concat = { ...parsed.concat }
+  }
+
+  if (merged.action === 'concat') {
+    if (!merged.concat) merged.concat = { ...DEFAULT_FFMPEG_CONCAT_COPY }
+    if (merged.concat.mode === 'xfade') {
+      merged.video = merged.video || { codec: DEFAULT_VIDEO_CODEC, crf: 23, preset: 'medium' }
+      merged.audio = merged.audio || { codec: 'aac', bitrate: '128k' }
+    } else {
+      if (!parsed.video) delete merged.video
+      if (!parsed.audio) delete merged.audio
+    }
+  }
+
   if (merged.action === 'watermark') {
     if (!parsed.video) delete merged.video
     if (!parsed.audio) delete merged.audio
@@ -366,15 +403,22 @@ export function getJobOutputFormat(config: FfmpegJobConfig): string {
 export function resolveJobInput(
   config: FfmpegJobConfig,
   context: Record<string, unknown>,
-  options: { inputFilePath: string; prevOutput?: string }
+  options: { inputFilePath: string; prevOutput?: string; stepId?: string }
 ): string {
   if (config.input?.path) {
     return config.input.path
   }
 
+  if (options.stepId) {
+    const branchInput = context[`${options.stepId}.input`]
+    if (typeof branchInput === 'string' && branchInput) {
+      return branchInput
+    }
+  }
+
   const source = config.input?.source ?? 'input'
 
-  if (source === 'input') {
+  if (source === 'input' || source === 'merge') {
     const value = context.input
     return typeof value === 'string' ? value : options.inputFilePath
   }

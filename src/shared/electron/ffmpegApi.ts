@@ -67,6 +67,10 @@ export interface FfmpegRunJobRequest {
   taskId: string
   duration?: number
   overlayImages?: string[]
+  inputPaths?: string[]
+  segmentDurations?: number[]
+  segmentHasAudio?: boolean[]
+  targetSize?: { width: number; height: number }
 }
 
 export interface FfmpegPreviewJobCommandRequest {
@@ -74,6 +78,10 @@ export interface FfmpegPreviewJobCommandRequest {
   inputPath?: string
   outputPath?: string
   overlayImages?: string[]
+  inputPaths?: string[]
+  segmentDurations?: number[]
+  segmentHasAudio?: boolean[]
+  targetSize?: { width: number; height: number }
 }
 
 export interface FfmpegPreviewJobCommandResult {

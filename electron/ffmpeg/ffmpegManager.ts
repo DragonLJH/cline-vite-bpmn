@@ -3,6 +3,7 @@ import { FFmpegProgress } from "../ffmpeg/progressParser"
 import type { FFmpegResult, FFmpegTask } from "../ffmpeg/FFmpegExecutor"
 import { probeMedia, runFfmpegTask, type FfmpegProbeResult, type MediaInfo } from "./ffmpegRunner"
 import { buildJobCommand, formatFfmpegCommandPreview } from "./jobCommandBuilder"
+import type { BuildJobCommandOptions } from "../../src/shared/ffmpeg/jobCommandBuilder"
 import type { FfmpegJobConfig } from "./jobConfig"
 import { getJobOutputFormat, parseTrimDuration } from "./jobConfig"
 
@@ -174,7 +175,10 @@ class FfmpegManager {
     inputPath: string,
     outputPath: string | undefined,
     taskId: string,
-    options?: RunWithArgsOptions & { resolvedImages?: string[] }
+    options?: RunWithArgsOptions & {
+      resolvedImages?: string[]
+      commandOptions?: BuildJobCommandOptions
+    }
   ): Promise<FFmpegResult & { taskId: string; outputPath?: string }> {
     if (config.action === 'probe') {
       const probeResult = await this.probe(inputPath)
@@ -205,7 +209,8 @@ class FfmpegManager {
       config,
       inputPath,
       outputPath,
-      options?.resolvedImages || []
+      options?.resolvedImages || [],
+      options?.commandOptions || {}
     )
     console.log(`[ffmpegManager.executeJob][${taskId}] ${formatFfmpegCommandPreview(args)}`)
 
@@ -232,12 +237,13 @@ class FfmpegManager {
     config: FfmpegJobConfig,
     inputPath?: string,
     outputPath?: string,
-    resolvedImages: string[] = []
+    resolvedImages: string[] = [],
+    commandOptions: BuildJobCommandOptions = {}
   ): { command: string; args: string[] } {
     const resolvedInput = inputPath || '/path/to/input.mp4'
     const resolvedOutput = outputPath || '/path/to/output.mp4'
     const output = config.action === 'probe' ? undefined : resolvedOutput
-    const args = buildJobCommand(config, resolvedInput, output, resolvedImages)
+    const args = buildJobCommand(config, resolvedInput, output, resolvedImages, commandOptions)
     return {
       command: `ffmpeg ${formatFfmpegCommandPreview(args)}`,
       args

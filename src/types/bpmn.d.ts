@@ -230,6 +230,10 @@ export interface WorkflowGraph {
   processId: string
   tasks: WorkflowTask[]
   executionOrder: string[]
+  reverseAdjacency: Map<string, string[]>
+  nodeTypes: Map<string, string>
+  joinGateways: string[]
+  joinBarrierTasks: Map<string, string[]>
 }
 
 export interface MediaInfo {

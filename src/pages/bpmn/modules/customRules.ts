@@ -3,6 +3,9 @@ import { is } from 'bpmn-js/lib/util/ModelUtil'
 
 const ALLOWED_SHAPE_TYPES = new Set([
   'bpmn:ServiceTask',
+  'bpmn:ParallelGateway',
+  'bpmn:StartEvent',
+  'bpmn:EndEvent',
   'bpmn:SequenceFlow',
   'bpmn:Process',
   'label'

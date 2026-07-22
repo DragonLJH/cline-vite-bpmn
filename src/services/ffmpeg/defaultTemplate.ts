@@ -22,85 +22,31 @@ function ffmpegConfigAttr(config: FfmpegJobConfig): string {
 
 
 
-export function createDefaultBpmnXml(processId: string, processName: string): string {
-
-  const transcodeConfig = ffmpegConfigAttr({
-
-    type: 'ffmpeg',
-
-    action: 'transcode',
-
-    input: { source: 'input' },
-
-    output: { format: 'mp4', overwrite: true, var: 'transcode.output' },
-
-    video: { codec: 'libopenh264', bitrate: '1200k' },
-
-    audio: { codec: 'aac' },
-
-    global: { hideBanner: true, noStdin: true }
-
-  })
-
-
-
+export function createEmptyBpmnXml(processId: string, processName: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
-
 <bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-
   xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
-
   xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
-
   xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
-
   xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
-
   xmlns:ffmpeg="http://cline-vite-bpmn/schema/ffmpeg"
-
   id="Definitions_1"
-
   targetNamespace="http://bpmn.io/schema/bpmn"
-
   exporter="FFmpeg Workflow Designer"
-
   exporterVersion="1.0.0">
-
-  <bpmn:process id="${processId}" name="${processName}" isExecutable="true">
-
-    <bpmn:serviceTask id="ServiceTask_transcode" name="转码" implementation="##Other">
-
-      <bpmn:extensionElements>
-
-        <ffmpeg:config json="${transcodeConfig}" />
-
-      </bpmn:extensionElements>
-
-    </bpmn:serviceTask>
-
-  </bpmn:process>
-
+  <bpmn:process id="${processId}" name="${processName}" isExecutable="true" />
   <bpmndi:BPMNDiagram id="BPMNDiagram_1">
-
-    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="${processId}">
-
-      <bpmndi:BPMNShape id="ServiceTask_transcode_di" bpmnElement="ServiceTask_transcode">
-
-        <dc:Bounds x="280" y="80" width="100" height="80" />
-
-      </bpmndi:BPMNShape>
-
-    </bpmndi:BPMNPlane>
-
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="${processId}" />
   </bpmndi:BPMNDiagram>
-
 </bpmn:definitions>`
-
 }
 
+/** @deprecated 使用 createEmptyBpmnXml */
+export function createDefaultBpmnXml(processId: string, processName: string): string {
+  return createEmptyBpmnXml(processId, processName)
+}
 
-
-export const DEFAULT_BPMN_XML = createDefaultBpmnXml('Process_1', 'FFmpeg 工作流')
+export const DEFAULT_BPMN_XML = createEmptyBpmnXml('Process_1', '未命名流程')
 
 
 

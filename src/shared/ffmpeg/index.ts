@@ -8,6 +8,8 @@ export {
   DEFAULT_FFMPEG_JOB_CONFIG,
   DEFAULT_FFMPEG_CONCAT_COPY,
   DEFAULT_FFMPEG_CONCAT_XFADE,
+  DEFAULT_FFMPEG_XFADE_AUDIO,
+  DEFAULT_FFMPEG_XFADE_VIDEO,
   FFMPEG_ACTION_LABELS,
   getJobOutputFormat,
   getJobOutputVar,
@@ -56,7 +58,9 @@ export {
   canUseMergeAction,
   collectEntryInputTasks,
   collectUpstreamServiceTasks,
+  findImmediateUpstreamServiceTask,
   resolveBranchOutputPaths,
+  resolveImmediateUpstreamOutput,
   validateCopyMergeCompatibility
 } from './mergeInputs'
 
@@ -69,7 +73,8 @@ export {
   validateXfadeInputs,
   DEFAULT_XFADE_DURATION,
   DEFAULT_XFADE_FPS,
-  DEFAULT_XFADE_TRANSITION
+  DEFAULT_XFADE_TRANSITION,
+  XFADE_TRANSITION_OPTIONS
 } from './xfadeCommandBuilder'
 
 export type { XfadeCommandOptions } from './xfadeCommandBuilder'

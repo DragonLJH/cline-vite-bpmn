@@ -35,7 +35,10 @@ const Toolbar: React.FC<ToolbarProps> = ({
     hasUnsavedChanges,
     setHasUnsavedChanges,
     currentProcessId,
+    setCurrentProcessId,
     processList,
+    addProcess,
+    clearHistory,
     updateProcess
   } = usePageBpmnStore()
 
@@ -117,9 +120,19 @@ const Toolbar: React.FC<ToolbarProps> = ({
     try {
       const result = await bpmnService.importFromFile(file)
       if (result.success && result.process) {
-        setBpmnXml(result.process.bpmnXml)
-        setHasUnsavedChanges(true)
-        onImport?.(result.process.bpmnXml)
+        const importedProcess = result.process
+        const exists = processList.some(process => process.id === importedProcess.id)
+        if (exists) {
+          updateProcess(importedProcess.id, importedProcess)
+        } else {
+          addProcess(importedProcess)
+        }
+
+        setCurrentProcessId(importedProcess.id)
+        setBpmnXml(importedProcess.bpmnXml)
+        clearHistory()
+        setHasUnsavedChanges(false)
+        onImport?.(importedProcess.bpmnXml)
       } else {
         alert(`导入失败: ${result.errors?.[0]?.message || '未知错误'}`)
       }

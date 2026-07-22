@@ -31,7 +31,7 @@ export function validateCopyMergeCompatibility(
   const missing = infos.filter(item => !item.info?.videoCodec && !item.info?.width)
   if (missing.length > 0) {
     const labels = missing.map(item => taskNames?.get(item.taskId) || item.taskId).join('、')
-    return { ok: false, message: `copy 合并需要先在执行面板完成各分支探测，缺失: ${labels}` }
+    return { ok: false, message: `copy 合并需要各分支输出媒体信息，缺失: ${labels}` }
   }
 
   const baseline = infos[0].info!
@@ -154,6 +154,52 @@ export function collectUpstreamServiceTasks(
   return result.sort(
     (a, b) => graph.executionOrder.indexOf(a) - graph.executionOrder.indexOf(b)
   )
+}
+
+/** 沿当前节点向上追溯，找到最近的上游 ServiceTask（同分支链路上的直接前驱） */
+export function findImmediateUpstreamServiceTask(
+  taskId: string,
+  graph: WorkflowGraph
+): string | null {
+  const taskIds = new Set(graph.tasks.map(task => task.id))
+  const reverseAdjacency = graph.reverseAdjacency || new Map<string, string[]>()
+  const queue = [...(reverseAdjacency.get(taskId) || [])]
+  const visited = new Set<string>()
+
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    if (visited.has(current)) continue
+    visited.add(current)
+
+    if (taskIds.has(current)) return current
+
+    queue.push(...(reverseAdjacency.get(current) || []))
+  }
+
+  return null
+}
+
+/** 解析同分支链路上一步 ServiceTask 的输出路径（用于 input.source=prev） */
+export function resolveImmediateUpstreamOutput(
+  taskId: string,
+  graph: WorkflowGraph,
+  context: Record<string, unknown>
+): string | undefined {
+  const upstreamId = findImmediateUpstreamServiceTask(taskId, graph)
+  if (!upstreamId) return undefined
+
+  const legacyOutput = context[`${upstreamId}.output`]
+  if (typeof legacyOutput === 'string' && legacyOutput) return legacyOutput
+
+  const task = graph.tasks.find(item => item.id === upstreamId)
+  const outputVar = getJobOutputVar(
+    task?.ffmpegConfig || { type: 'ffmpeg', action: 'transcode' },
+    upstreamId
+  )
+  const value = context[outputVar]
+  if (typeof value === 'string' && value) return value
+
+  return undefined
 }
 
 export function resolveBranchOutputPaths(

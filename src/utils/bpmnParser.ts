@@ -237,6 +237,129 @@ function findNearestUpstreamServiceTask(
   return null
 }
 
+function findSplitGateways(
+  nodeTypes: Map<string, string>,
+  adjacency: Map<string, string[]>
+): string[] {
+  return [...nodeTypes.entries()]
+    .filter(([, type]) => type === 'bpmn:parallelGateway')
+    .map(([id]) => id)
+    .filter(id => (adjacency.get(id) || []).length >= 2)
+}
+
+/** 从 Split 网关沿路径累计 ServiceTask 深度（1 = 分支入口任务） */
+function computeServiceTaskBranchDepth(
+  splitGatewayIds: string[],
+  adjacency: Map<string, string[]>,
+  taskIds: Set<string>
+): Map<string, number> {
+  const depths = new Map<string, number>()
+  if (splitGatewayIds.length === 0) return depths
+
+  splitGatewayIds.forEach(splitId => {
+    let frontier: Array<{ nodeId: string; taskDepth: number }> = (adjacency.get(splitId) || [])
+      .map(nodeId => ({ nodeId, taskDepth: 0 }))
+    const seen = new Set<string>()
+
+    while (frontier.length > 0) {
+      const nextFrontier: typeof frontier = []
+
+      frontier.forEach(({ nodeId, taskDepth }) => {
+        const stateKey = `${nodeId}:${taskDepth}`
+        if (seen.has(stateKey)) return
+        seen.add(stateKey)
+
+        const currentTaskDepth = taskIds.has(nodeId) ? taskDepth + 1 : taskDepth
+        if (taskIds.has(nodeId)) {
+          const prev = depths.get(nodeId)
+          if (prev === undefined || currentTaskDepth < prev) {
+            depths.set(nodeId, currentTaskDepth)
+          }
+        }
+
+        ;(adjacency.get(nodeId) || []).forEach(next => {
+          nextFrontier.push({ nodeId: next, taskDepth: currentTaskDepth })
+        })
+      })
+
+      frontier = nextFrontier
+    }
+  })
+
+  return depths
+}
+
+function compareWaveNodeOrder(
+  a: string,
+  b: string,
+  taskIds: Set<string>,
+  branchDepths: Map<string, number>,
+  taskIndex: Map<string, number>
+): number {
+  const aIsTask = taskIds.has(a)
+  const bIsTask = taskIds.has(b)
+  if (!aIsTask && bIsTask) return -1
+  if (aIsTask && !bIsTask) return 1
+  if (!aIsTask && !bIsTask) return 0
+
+  const depthA = branchDepths.get(a) ?? Number.MAX_SAFE_INTEGER
+  const depthB = branchDepths.get(b) ?? Number.MAX_SAFE_INTEGER
+  if (depthA !== depthB) return depthA - depthB
+  return (taskIndex.get(a) ?? 0) - (taskIndex.get(b) ?? 0)
+}
+
+function buildBranchAwareExecutionOrder(
+  startIds: string[],
+  adjacency: Map<string, string[]>,
+  inDegree: Map<string, number>,
+  taskIds: Set<string>,
+  tasks: WorkflowTask[],
+  nodeTypes: Map<string, string>
+): string[] {
+  const splitGateways = findSplitGateways(nodeTypes, adjacency)
+  const branchDepths = computeServiceTaskBranchDepth(splitGateways, adjacency, taskIds)
+  const taskIndex = new Map(tasks.map((task, index) => [task.id, index]))
+
+  const executionOrder: string[] = []
+  const visited = new Set<string>()
+  const degree = new Map(inDegree)
+
+  const collectReady = (seeds: string[]) => seeds
+    .filter(id => (degree.get(id) || 0) <= 0 && !visited.has(id))
+    .sort((a, b) => compareWaveNodeOrder(a, b, taskIds, branchDepths, taskIndex))
+
+  let ready = collectReady(startIds)
+
+  if (ready.length === 0) {
+    ready = collectReady(tasks.map(t => t.id).filter(id => (degree.get(id) || 0) <= 0))
+  }
+
+  while (ready.length > 0) {
+    const nextReady: string[] = []
+
+    ready.forEach(current => {
+      if (visited.has(current)) return
+      visited.add(current)
+
+      if (taskIds.has(current)) {
+        executionOrder.push(current)
+      }
+
+      ;(adjacency.get(current) || []).forEach(next => {
+        const nextDegree = (degree.get(next) || 0) - 1
+        degree.set(next, nextDegree)
+        if (nextDegree <= 0 && !visited.has(next)) {
+          nextReady.push(next)
+        }
+      })
+    })
+
+    ready = nextReady.sort((a, b) => compareWaveNodeOrder(a, b, taskIds, branchDepths, taskIndex))
+  }
+
+  return executionOrder
+}
+
 function buildJoinBarrierTasks(
   joinGateways: string[],
   taskIds: Set<string>,
@@ -266,8 +389,8 @@ function buildJoinBarrierTasks(
 }
 
 /**
- * 解析 FFmpeg 工作流图：收集 ServiceTask 配置并按 sequenceFlow 拓扑排序执行顺序。
- * 优先从 StartEvent 遍历（兼容旧流程），无开始节点时从入度为 0 的 ServiceTask 开始。
+ * 解析 FFmpeg 工作流图：收集 ServiceTask 配置并按拓扑 + 分支深度排序执行顺序。
+ * 从 Split 网关出发按层调度，保证各分支入口先于更深层的操作执行。
  */
 export function parseWorkflowGraph(xmlString: string): WorkflowGraph | null {
   const doc = parseXmlToDoc(xmlString)
@@ -322,41 +445,6 @@ export function parseWorkflowGraph(xmlString: string): WorkflowGraph | null {
     if (id) startIds.push(id)
   })
 
-  const executionOrder: string[] = []
-  const visited = new Set<string>()
-  const queue: string[] = []
-
-  startIds.forEach(id => {
-    if ((inDegree.get(id) || 0) === 0) queue.push(id)
-  })
-
-  if (queue.length === 0) {
-    tasks.forEach(t => {
-      if ((inDegree.get(t.id) || 0) === 0) queue.push(t.id)
-    })
-  }
-
-  while (queue.length > 0) {
-    const current = queue.shift()!
-    if (visited.has(current)) continue
-    visited.add(current)
-
-    if (taskIds.has(current)) {
-      executionOrder.push(current)
-    }
-
-    const neighbors = adjacency.get(current) || []
-    neighbors.forEach(next => {
-      const nextDegree = (inDegree.get(next) || 0) - 1
-      inDegree.set(next, nextDegree)
-      if (nextDegree <= 0 && !visited.has(next)) {
-        queue.push(next)
-      }
-    })
-  }
-
-  if (executionOrder.length === 0) return null
-
   const nodeTypes = new Map<string, string>()
   GRAPH_NODE_TYPES.forEach(type => {
     const elements = processElement.querySelectorAll(`bpmn\\:${type}, ${type}`)
@@ -365,6 +453,17 @@ export function parseWorkflowGraph(xmlString: string): WorkflowGraph | null {
       if (id) nodeTypes.set(id, `bpmn:${type}`)
     })
   })
+
+  const executionOrder = buildBranchAwareExecutionOrder(
+    startIds.filter(id => (inDegree.get(id) || 0) === 0),
+    adjacency,
+    inDegree,
+    taskIds,
+    tasks,
+    nodeTypes
+  )
+
+  if (executionOrder.length === 0) return null
 
   const reverseAdjacency = new Map<string, string[]>()
   flowElements.forEach(flow => {

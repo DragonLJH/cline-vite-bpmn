@@ -45,7 +45,7 @@ export {
   validateCopyMergeCompatibility
 } from '../../shared/ffmpeg/mergeInputs'
 
-export { createDefaultBpmnXml, createParallelMergeBpmnXml, DEFAULT_BPMN_XML } from './defaultTemplate'
+export { createDefaultBpmnXml, createEmptyBpmnXml, createParallelMergeBpmnXml, DEFAULT_BPMN_XML } from './defaultTemplate'
 
 export { buildFfmpegArgs, buildFfmpegCommand, buildOperationArgs, previewFfmpegCommand, resolveVariable, getOutputExtension, resolveWatermarkPath } from './presets'
 

@@ -18,7 +18,12 @@ interface FilterGraphResult {
 
 export function formatFfmpegCommandPreview(args: string[]): string {
   return args
-    .map(arg => (/\s/.test(arg) ? `"${arg}"` : arg))
+    .map(arg => {
+      if (/\s/.test(arg) || arg.startsWith('[') || arg.includes(';') || arg.includes(':')) {
+        return `"${arg.replace(/"/g, '\\"')}"`
+      }
+      return arg
+    })
     .join(' ')
 }
 

@@ -1,10 +1,31 @@
 import type { FfmpegJobConfig, FfmpegJobConcat } from './jobConfig'
-import { DEFAULT_VIDEO_CODEC, resolveVideoCodec, supportsX264Preset } from './codecResolver'
+import {
+  DEFAULT_VIDEO_CODEC,
+  getVideoRateControl,
+  resolveVideoCodec,
+  supportsX264Preset
+} from './codecResolver'
 
 export const DEFAULT_XFADE_TRANSITION = 'fade'
 export const DEFAULT_XFADE_DURATION = 0.5
 export const DEFAULT_XFADE_FPS = 30
 export const DEFAULT_XFADE_SCALE = '1920:1080'
+
+/** FFmpeg xfade 支持的常用转场（fade = 淡入淡出） */
+export const XFADE_TRANSITION_OPTIONS = [
+  { value: 'fade', label: '淡入淡出 (fade)' },
+  { value: 'fadeblack', label: '黑场淡化' },
+  { value: 'fadewhite', label: '白场淡化' },
+  { value: 'dissolve', label: '溶解 (dissolve)' },
+  { value: 'wiperight', label: '向右擦除' },
+  { value: 'wipeleft', label: '向左擦除' },
+  { value: 'slideleft', label: '向左滑动' },
+  { value: 'slideright', label: '向右滑动' },
+  { value: 'circleopen', label: '圆形展开' },
+  { value: 'circleclose', label: '圆形收缩' }
+] as const
+
+const VALID_XFADE_TRANSITIONS = new Set(XFADE_TRANSITION_OPTIONS.map(opt => opt.value))
 
 export interface XfadeCommandOptions {
   inputPaths: string[]
@@ -23,6 +44,18 @@ function getConcatSettings(config: FfmpegJobConfig): Required<Pick<FfmpegJobConc
   }
 }
 
+function toEvenDimension(value: number): number {
+  const n = Math.max(2, Math.floor(value))
+  return n % 2 === 0 ? n : n - 1
+}
+
+function sanitizeTransition(transition: string): string {
+  const normalized = transition.trim().toLowerCase()
+  return VALID_XFADE_TRANSITIONS.has(normalized as typeof XFADE_TRANSITION_OPTIONS[number]['value'])
+    ? normalized
+    : DEFAULT_XFADE_TRANSITION
+}
+
 function resolveTargetSize(
   scaleTo: string,
   targetSize?: { width: number; height: number }
@@ -30,14 +63,14 @@ function resolveTargetSize(
   if (scaleTo !== 'first') {
     const [w, h] = scaleTo.split(':').map(Number)
     if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
-      return { width: Math.floor(w), height: Math.floor(h) }
+      return { width: toEvenDimension(w), height: toEvenDimension(h) }
     }
   }
   if (targetSize?.width && targetSize?.height) {
-    return targetSize
+    return { width: toEvenDimension(targetSize.width), height: toEvenDimension(targetSize.height) }
   }
   const [w, h] = DEFAULT_XFADE_SCALE.split(':').map(Number)
-  return { width: w, height: h }
+  return { width: toEvenDimension(w), height: toEvenDimension(h) }
 }
 
 function buildNormalizeVideoFilter(
@@ -47,7 +80,8 @@ function buildNormalizeVideoFilter(
 ): string {
   const input = `[${index}:v]`
   const output = `[vn${index}]`
-  return `${input}fps=${fps},setsar=1,setpts=PTS-STARTPTS,scale=${target.width}:${target.height}:force_original_aspect_ratio=decrease,pad=${target.width}:${target.height}:(ow-iw)/2:(oh-ih)/2${output}`
+  // xfade 要求恒定帧率(CFR)；copy/trim 输出可能缺 fps 元数据，需先重置时间轴再 fps+format
+  return `${input}settb=AVTB,setpts=PTS-STARTPTS,fps=${fps},setsar=1,format=yuv420p,scale=${target.width}:${target.height}:force_original_aspect_ratio=decrease,pad=${target.width}:${target.height}:(ow-iw)/2:(oh-ih)/2${output}`
 }
 
 function buildNormalizeAudioFilter(index: number, hasAudio: boolean, duration: number): string {
@@ -63,7 +97,9 @@ export function computeXfadeOffsets(durations: number[], fadeDuration: number): 
 
   for (let i = 0; i < durations.length - 1; i += 1) {
     accumulated += durations[i]
-    offsets.push(Math.max(0, accumulated - (i + 1) * fadeDuration))
+    const raw = accumulated - (i + 1) * fadeDuration
+    const maxOffset = Math.max(0, durations[i] - fadeDuration - 0.05)
+    offsets.push(Math.max(0, Math.min(raw, maxOffset)))
   }
 
   return offsets
@@ -109,7 +145,7 @@ export function buildXfadeFilterComplex(
 
   const offsets = computeXfadeOffsets(segmentDurations, settings.duration)
   const fadeDuration = settings.duration
-  const transition = settings.transition
+  const transition = sanitizeTransition(settings.transition)
 
   let currentVideo = '[vn0]'
   let currentAudio = '[an0]'
@@ -122,7 +158,7 @@ export function buildXfadeFilterComplex(
     const audioOut = isLast ? '[outa]' : `[xa${i + 1}]`
 
     videoParts.push(
-      `${currentVideo}${nextVideo}xfade=transition=${transition}:duration=${fadeDuration}:offset=${offsets[i]}${videoOut}`
+      `${currentVideo}${nextVideo}xfade=transition=${transition}:duration=${fadeDuration}:offset=${offsets[i].toFixed(3)}${videoOut}`
     )
     audioParts.push(
       `${currentAudio}${nextAudio}acrossfade=d=${fadeDuration}:c1=tri:c2=tri${audioOut}`
@@ -141,13 +177,14 @@ export function buildXfadeFilterComplex(
 
 function appendVideoAudioArgs(args: string[], config: FfmpegJobConfig) {
   const videoCodec = resolveVideoCodec(config.video?.codec) || DEFAULT_VIDEO_CODEC
+  const rate = getVideoRateControl(videoCodec, config.video)
   args.push('-c:v', videoCodec)
-  if (config.video?.bitrate) args.push('-b:v', config.video.bitrate)
-  if (config.video?.preset && supportsX264Preset(videoCodec)) {
-    args.push('-preset', config.video.preset)
+  if (rate.bitrate) {
+    args.push('-b:v', rate.bitrate)
+  } else {
+    if (rate.crf != null) args.push('-crf', String(rate.crf))
+    if (rate.preset && supportsX264Preset(videoCodec)) args.push('-preset', rate.preset)
   }
-  if (config.video?.crf != null) args.push('-crf', String(config.video.crf))
-  else if (!config.video?.bitrate) args.push('-crf', '23')
 
   const audioCodec = config.audio?.codec || 'aac'
   args.push('-c:a', audioCodec)

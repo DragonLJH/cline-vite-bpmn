@@ -15,6 +15,7 @@ import {
   collectEntryInputTasks,
   collectUpstreamServiceTasks,
   resolveBranchOutputPaths,
+  resolveImmediateUpstreamOutput,
   validateCopyMergeCompatibility
 } from '../../shared/ffmpeg/mergeInputs'
 
@@ -164,12 +165,40 @@ function assertJoinBarrierReady(graph: WorkflowGraph, stepId: string, context: R
     const barrierTasks = graph.joinBarrierTasks.get(predId) || []
     barrierTasks.forEach(taskId => {
       const output = context[`${taskId}.output`]
-      const info = context[`${taskId}.info`]
-      const branchInput = context[`${taskId}.input`]
-      if (typeof output !== 'string' && !info && typeof branchInput !== 'string') {
+      if (typeof output !== 'string' || !output) {
         throw new Error(`Join 屏障未满足：分支 ${taskId} 尚未完成`)
       }
     })
+  })
+}
+
+async function recordStepOutputContext(
+  ffmpeg: NonNullable<Window['electronAPI']>['ffmpeg'],
+  stepId: string,
+  outputPath: string,
+  outputKey: string,
+  context: Record<string, unknown>
+): Promise<MediaInfo | undefined> {
+  context[outputKey] = outputPath
+  context[`${stepId}.output`] = outputPath
+
+  try {
+    const probeResult = await ffmpeg.probe({ inputPath: outputPath, taskId: stepId })
+    if (probeResult.success && probeResult.info) {
+      context[`${stepId}.info`] = probeResult.info
+      return probeResult.info
+    }
+  } catch {
+    // 输出探测失败不阻断非合并步骤
+  }
+
+  return undefined
+}
+
+function getSegmentHasAudio(taskIds: string[], context: Record<string, unknown>): boolean[] {
+  return taskIds.map(taskId => {
+    const info = context[`${taskId}.info`] as MediaInfo | undefined
+    return Boolean(info?.audioCodec)
   })
 }
 
@@ -177,7 +206,7 @@ function getSegmentDurations(taskIds: string[], context: Record<string, unknown>
   return taskIds.map(taskId => {
     const info = context[`${taskId}.info`] as MediaInfo | undefined
     if (info?.durationSeconds && info.durationSeconds > 0) return info.durationSeconds
-    throw new Error(`交叉淡化合并需要分支 ${taskId} 的时长信息，请先在执行面板选择文件并完成探测`)
+    throw new Error(`交叉淡化合并需要分支 ${taskId} 的输出时长信息，请确认该分支已成功执行`)
   })
 }
 
@@ -231,7 +260,6 @@ export async function runWorkflow(
   }
 
   const steps: WorkflowStepResult[] = []
-  let prevOutput: string | undefined
   const fallbackInput = typeof entryInputs === 'string'
     ? entryInputs
     : ('path' in entryInputs
@@ -316,15 +344,19 @@ export async function runWorkflow(
           }
 
           stepResult.status = 'success'
-          context[outputKey] = outputPath
-          context[`${stepId}.output`] = outputPath
-          prevOutput = outputPath
+          stepResult.mediaInfo = await recordStepOutputContext(ffmpeg, stepId, outputPath, outputKey, context)
         } else {
           const segmentDurations = getSegmentDurations(upstreamTaskIds, context)
+          const segmentHasAudio = getSegmentHasAudio(upstreamTaskIds, context)
+          const firstBranchInfo = context[`${upstreamTaskIds[0]}.info`] as MediaInfo | undefined
+          const targetSize = firstBranchInfo?.width && firstBranchInfo?.height
+            ? { width: firstBranchInfo.width, height: firstBranchInfo.height }
+            : undefined
           const commandOptions: BuildJobCommandOptions = {
             inputPaths: branchPaths,
             segmentDurations,
-            targetSize: undefined
+            segmentHasAudio,
+            targetSize
           }
 
           stepResult.inputPath = branchPaths.join(', ')
@@ -356,7 +388,8 @@ export async function runWorkflow(
             taskId: stepId,
             duration: totalDuration,
             inputPaths: branchPaths,
-            segmentDurations
+            segmentDurations,
+            segmentHasAudio
           })
 
           stepResult.outputPath = outputPath
@@ -374,9 +407,7 @@ export async function runWorkflow(
           }
 
           stepResult.status = 'success'
-          context[outputKey] = outputPath
-          context[`${stepId}.output`] = outputPath
-          prevOutput = outputPath
+          stepResult.mediaInfo = await recordStepOutputContext(ffmpeg, stepId, outputPath, outputKey, context)
         }
 
         steps.push(stepResult)
@@ -386,7 +417,7 @@ export async function runWorkflow(
 
       const inputPath = resolveJobInput(config, context, {
         inputFilePath: fallbackInput,
-        prevOutput,
+        prevOutput: resolveImmediateUpstreamOutput(stepId, graph, context),
         stepId
       })
       stepResult.inputPath = inputPath
@@ -462,9 +493,7 @@ export async function runWorkflow(
       }
 
       stepResult.status = 'success'
-      context[outputKey] = outputPath
-      context[`${stepId}.output`] = outputPath
-      prevOutput = outputPath
+      stepResult.mediaInfo = await recordStepOutputContext(ffmpeg, stepId, outputPath, outputKey, context)
 
       steps.push(stepResult)
       onStepUpdate?.(stepResult)

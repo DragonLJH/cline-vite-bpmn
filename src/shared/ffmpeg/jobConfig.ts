@@ -1,4 +1,4 @@
-import { DEFAULT_VIDEO_CODEC, resolveVideoCodec } from './codecResolver'
+import { DEFAULT_VIDEO_CODEC, DEFAULT_OPENH264_BITRATE, resolveVideoCodec, sanitizeVideoEncoding } from './codecResolver'
 
 export type FfmpegJobAction =
   | 'probe'
@@ -124,6 +124,16 @@ export interface LegacyFfmpegTaskConfig {
 }
 
 export const DEFAULT_FFMPEG_CONCAT_COPY: FfmpegJobConcat = { mode: 'copy' }
+
+export const DEFAULT_FFMPEG_XFADE_VIDEO: NonNullable<FfmpegJobConfig['video']> = {
+  codec: DEFAULT_VIDEO_CODEC,
+  bitrate: DEFAULT_OPENH264_BITRATE
+}
+
+export const DEFAULT_FFMPEG_XFADE_AUDIO: NonNullable<FfmpegJobConfig['audio']> = {
+  codec: 'aac',
+  bitrate: '128k'
+}
 
 export const DEFAULT_FFMPEG_CONCAT_XFADE: FfmpegJobConcat = {
   mode: 'xfade',
@@ -354,8 +364,8 @@ function mergeJobConfig(parsed: Partial<FfmpegJobConfig>): FfmpegJobConfig {
   if (merged.action === 'concat') {
     if (!merged.concat) merged.concat = { ...DEFAULT_FFMPEG_CONCAT_COPY }
     if (merged.concat.mode === 'xfade') {
-      merged.video = merged.video || { codec: DEFAULT_VIDEO_CODEC, crf: 23, preset: 'medium' }
-      merged.audio = merged.audio || { codec: 'aac', bitrate: '128k' }
+      merged.video = sanitizeVideoEncoding(merged.video || { ...DEFAULT_FFMPEG_XFADE_VIDEO })
+      merged.audio = merged.audio || { ...DEFAULT_FFMPEG_XFADE_AUDIO }
     } else {
       if (!parsed.video) delete merged.video
       if (!parsed.audio) delete merged.audio

@@ -22,7 +22,8 @@ const ProcessList: React.FC<ProcessListProps> = ({ className, onSelectProcess, l
     setBpmnXml,
     clearHistory,
     setHasUnsavedChanges,
-    createNewProcess
+    createNewProcess,
+    getDefaultXml
   } = usePageBpmnStore()
 
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -94,10 +95,9 @@ const ProcessList: React.FC<ProcessListProps> = ({ className, onSelectProcess, l
     deleteProcess(id)
     setShowDeleteConfirm(null)
 
-    // 如果删除的是当前流程，清空画布
+    // 如果删除的是当前流程，恢复空画布
     if (currentProcessId === id) {
-      const defaultXml = bpmnService.createProcess('新流程').bpmnXml
-      setBpmnXml(defaultXml)
+      setBpmnXml(getDefaultXml())
       clearHistory()
       setHasUnsavedChanges(false)
     }

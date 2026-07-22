@@ -1,17 +1,21 @@
-import { assign } from 'min-dash'
 import ContextPadProvider from 'bpmn-js/lib/features/context-pad/ContextPadProvider'
 import { is } from 'bpmn-js/lib/util/ModelUtil'
+import type { ContextPadEntries } from 'diagram-js/lib/features/context-pad/ContextPadProvider'
 
 class FfmpegContextPadProvider extends ContextPadProvider {
-  getContextPadEntries(element: any) {
-    const entries = super.getContextPadEntries(element) as Record<string, unknown>
-    const filtered: Record<string, unknown> = {}
+  getContextPadEntries(element: any): ContextPadEntries {
+    const entries = super.getContextPadEntries(element) as ContextPadEntries
+    const filtered: ContextPadEntries = {}
 
     if (entries.delete) filtered.delete = entries.delete
     if (entries.connect) filtered.connect = entries.connect
 
     if (this.shouldShowServiceTaskAppend(element)) {
       filtered['append.service-task'] = this.createServiceTaskAppendEntry(element)
+    }
+
+    if (this.shouldShowBranchAppend(element)) {
+      filtered['append.branch-processing'] = this.createBranchAppendEntry(element)
     }
 
     if (this.shouldShowParallelGatewayAppend(element)) {
@@ -25,8 +29,17 @@ class FfmpegContextPadProvider extends ContextPadProvider {
     const businessObject = element.businessObject
 
     if (!is(businessObject, 'bpmn:FlowNode')) return false
+    if (is(businessObject, 'bpmn:EndEvent')) return false
     if (is(businessObject, 'bpmn:EventBasedGateway')) return false
-    if (is(businessObject, 'bpmn:ParallelGateway')) return false
+    if (businessObject.isForCompensation) return false
+
+    return true
+  }
+
+  shouldShowBranchAppend(element: any): boolean {
+    const businessObject = element.businessObject
+
+    if (!is(businessObject, 'bpmn:ServiceTask')) return false
     if (businessObject.isForCompensation) return false
 
     return true
@@ -34,8 +47,12 @@ class FfmpegContextPadProvider extends ContextPadProvider {
 
   shouldShowParallelGatewayAppend(element: any): boolean {
     const businessObject = element.businessObject
-    if (!is(businessObject, 'bpmn:ParallelGateway')) return false
+
+    if (!is(businessObject, 'bpmn:FlowNode')) return false
+    if (is(businessObject, 'bpmn:EndEvent')) return false
+    if (is(businessObject, 'bpmn:EventBasedGateway')) return false
     if (businessObject.isForCompensation) return false
+
     return true
   }
 
@@ -64,17 +81,74 @@ class FfmpegContextPadProvider extends ContextPadProvider {
         }
       : null
 
+    const action: Record<string, any> = {
+      dragstart: appendStart,
+      click: append
+    }
+
+    if (previewAppend) {
+      action.hover = previewAppend
+    }
+
     return {
       group: 'model',
       className,
       title,
-      action: assign(
-        {
-          dragstart: appendStart,
-          click: append
-        },
-        previewAppend ? { hover: previewAppend } : {}
-      )
+      action
+    }
+  }
+
+  createNamedShape(shapeType: string, name: string) {
+    const elementFactory = (this as any)._elementFactory
+    const shape = elementFactory.createShape({ type: shapeType })
+
+    if (shape.businessObject) {
+      shape.businessObject.name = name
+    }
+
+    return shape
+  }
+
+  createBranchAppendEntry(element: any) {
+    const modeling = (this as any)._modeling
+    const canvas = (this as any)._canvas
+
+    const appendBranch = (_: Event, source: any) => {
+      const parent = source.parent || canvas.getRootElement()
+      const sourceCenterY = source.y + source.height / 2
+      const gatewayCenter = {
+        x: source.x + source.width + 95,
+        y: sourceCenterY
+      }
+      const branchTaskX = gatewayCenter.x + 170
+      const branchOffsetY = 75
+
+      const gateway = this.createNamedShape('bpmn:ParallelGateway', '分支')
+      const branchA = this.createNamedShape('bpmn:ServiceTask', '分支A')
+      const branchB = this.createNamedShape('bpmn:ServiceTask', '分支B')
+
+      const createdGateway = modeling.createShape(gateway, gatewayCenter, parent)
+      const createdBranchA = modeling.createShape(branchA, {
+        x: branchTaskX,
+        y: sourceCenterY - branchOffsetY
+      }, parent)
+      const createdBranchB = modeling.createShape(branchB, {
+        x: branchTaskX,
+        y: sourceCenterY + branchOffsetY
+      }, parent)
+
+      modeling.connect(source, createdGateway)
+      modeling.connect(createdGateway, createdBranchA)
+      modeling.connect(createdGateway, createdBranchB)
+    }
+
+    return {
+      group: 'model',
+      className: 'bpmn-icon-gateway-parallel',
+      title: '追加分支处理',
+      action: {
+        click: appendBranch
+      }
     }
   }
 
@@ -92,7 +166,7 @@ class FfmpegContextPadProvider extends ContextPadProvider {
       element,
       'bpmn:ParallelGateway',
       'bpmn-icon-gateway-parallel',
-      '追加并行网关'
+      '追加汇合网关'
     )
   }
 }

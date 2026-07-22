@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { ProcessDefinition, BpmnElement, BpmnHistory, FfmpegJobConfig, MediaInfo } from '../types/bpmn'
-import { DEFAULT_BPMN_XML as FFMPEG_DEFAULT_BPMN_XML } from '../services/ffmpeg/defaultTemplate'
+import { DEFAULT_BPMN_XML as FFMPEG_DEFAULT_BPMN_XML, createEmptyBpmnXml } from '../services/ffmpeg/defaultTemplate'
 import { migrateProbeNodesFromBpmnXml } from '../services/ffmpeg/probeNodeMigration'
 import type { WorkflowEntryPayload } from '../services/ffmpeg/workflowRunner'
 import { formatSecondsToFfmpegTime } from '../services/ffmpeg/timeUtils'
@@ -251,7 +251,7 @@ export const useFfmpegBpmnStore = create<FfmpegBpmnState>((set, get) => ({
       id,
       name,
       description,
-      bpmnXml: DEFAULT_BPMN_XML.replace(/Process_1/g, id),
+      bpmnXml: createEmptyBpmnXml(id, name),
       createdAt: now,
       updatedAt: now,
       version: 1

@@ -17,12 +17,14 @@ import {
 } from '../../../../services/ffmpeg/configCodec'
 
 import { previewJobCommand } from '../../../../services/ffmpeg/jobCommandBuilder'
-import { DEFAULT_FFMPEG_CONCAT_COPY } from '../../../../shared/ffmpeg/jobConfig'
+import { DEFAULT_FFMPEG_CONCAT_COPY, DEFAULT_FFMPEG_XFADE_AUDIO, DEFAULT_FFMPEG_XFADE_VIDEO } from '../../../../shared/ffmpeg/jobConfig'
 import {
   canUseMergeAction,
   collectEntryInputTasks,
   collectUpstreamServiceTasks
 } from '../../../../shared/ffmpeg/mergeInputs'
+import { sanitizeVideoEncoding, supportsX264Preset } from '../../../../shared/ffmpeg/codecResolver'
+import { XFADE_TRANSITION_OPTIONS } from '../../../../shared/ffmpeg/xfadeCommandBuilder'
 import { parseWorkflowGraph } from '../../../../utils/bpmnParser'
 
 import {
@@ -459,17 +461,14 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
 
   const updateVideo = (patch: Partial<NonNullable<FfmpegJobConfig['video']>>) => {
-
-    setFfmpegConfig(prev => ({
-
-      ...prev,
-
-      video: { ...prev.video, ...patch }
-
-    }))
-
+    setFfmpegConfig(prev => {
+      const merged = { ...prev.video, ...patch }
+      const video = prev.action === 'concat' && prev.concat?.mode === 'xfade'
+        ? sanitizeVideoEncoding(merged)
+        : merged
+      return { ...prev, video }
+    })
     setHasChanges(true)
-
   }
 
 
@@ -496,8 +495,8 @@ const FfmpegPropertiesPanel: React.FC = () => {
         concat: { ...prev.concat, ...patch, mode: nextMode }
       }
       if (nextMode === 'xfade') {
-        next.video = next.video || { codec: 'libopenh264', crf: 23, preset: 'medium' }
-        next.audio = next.audio || { codec: 'aac', bitrate: '128k' }
+        next.video = sanitizeVideoEncoding(next.video || { ...DEFAULT_FFMPEG_XFADE_VIDEO })
+        next.audio = next.audio || { ...DEFAULT_FFMPEG_XFADE_AUDIO }
       } else {
         delete next.video
         delete next.audio
@@ -1394,10 +1393,14 @@ const FfmpegPropertiesPanel: React.FC = () => {
               <>
                 <label className="ffmpeg-props__field">
                   <span>转场效果</span>
-                  <input
+                  <select
                     value={ffmpegConfig.concat?.transition || 'fade'}
                     onChange={e => updateConcat({ transition: e.target.value })}
-                  />
+                  >
+                    {XFADE_TRANSITION_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
                 </label>
                 <label className="ffmpeg-props__field">
                   <span>转场时长 (秒)</span>
@@ -1405,6 +1408,7 @@ const FfmpegPropertiesPanel: React.FC = () => {
                     type="number"
                     min={0.1}
                     step={0.1}
+                    max={30}
                     value={ffmpegConfig.concat?.duration ?? 0.5}
                     onChange={e => updateConcat({ duration: Number(e.target.value) || 0.5 })}
                   />
@@ -1414,6 +1418,7 @@ const FfmpegPropertiesPanel: React.FC = () => {
                   <input
                     type="number"
                     min={1}
+                    max={120}
                     value={ffmpegConfig.concat?.fps ?? 30}
                     onChange={e => updateConcat({ fps: Number(e.target.value) || 30 })}
                   />
@@ -1424,32 +1429,67 @@ const FfmpegPropertiesPanel: React.FC = () => {
                     value={String(ffmpegConfig.video?.codec ?? 'libopenh264')}
                     onChange={e => updateVideo({ codec: e.target.value })}
                   >
-                    {VIDEO_CODEC_OPTIONS.map(opt => (
+                    {VIDEO_CODEC_OPTIONS.filter(opt => opt.value !== 'copy').map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </label>
+                {supportsX264Preset(ffmpegConfig.video?.codec) ? (
+                  <>
+                    <label className="ffmpeg-props__field">
+                      <span>CRF</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={51}
+                        value={ffmpegConfig.video?.crf ?? 23}
+                        onChange={e => updateVideo({ crf: Number(e.target.value) })}
+                      />
+                    </label>
+                    <label className="ffmpeg-props__field">
+                      <span>预设</span>
+                      <select
+                        value={String(ffmpegConfig.video?.preset ?? 'medium')}
+                        onChange={e => updateVideo({ preset: e.target.value })}
+                      >
+                        {PRESET_OPTIONS.map(opt => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                ) : (
+                  <label className="ffmpeg-props__field">
+                    <span>视频码率</span>
+                    <input
+                      value={ffmpegConfig.video?.bitrate ?? '1200k'}
+                      onChange={e => updateVideo({ bitrate: e.target.value })}
+                      placeholder="1200k"
+                    />
+                  </label>
+                )}
+                <label className="ffmpeg-props__field">
+                  <span>音频编码</span>
+                  <select
+                    value={String(ffmpegConfig.audio?.codec ?? 'aac')}
+                    onChange={e => updateAudio({ codec: e.target.value })}
+                  >
+                    {AUDIO_CODEC_OPTIONS.filter(opt => opt.value !== 'copy').map(opt => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>
                 </label>
                 <label className="ffmpeg-props__field">
-                  <span>CRF</span>
+                  <span>音频码率</span>
                   <input
-                    type="number"
-                    min={0}
-                    max={51}
-                    value={ffmpegConfig.video?.crf ?? 23}
-                    onChange={e => updateVideo({ crf: Number(e.target.value) })}
+                    value={ffmpegConfig.audio?.bitrate ?? '128k'}
+                    onChange={e => updateAudio({ bitrate: e.target.value })}
+                    placeholder="128k"
                   />
                 </label>
-                <label className="ffmpeg-props__field">
-                  <span>预设</span>
-                  <select
-                    value={String(ffmpegConfig.video?.preset ?? 'medium')}
-                    onChange={e => updateVideo({ preset: e.target.value })}
-                  >
-                    {PRESET_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </label>
+                <p className="ffmpeg-props__hint">
+                  交叉淡化会重编码输出。内置 FFmpeg 使用 libopenh264，请配置视频码率（非 CRF）。
+                </p>
               </>
             )}
             {ffmpegConfig.concat?.mode !== 'xfade' && (

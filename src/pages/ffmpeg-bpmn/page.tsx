@@ -10,26 +10,11 @@ import Icon from '../../components/Icon'
 import { BpmnStoreProvider } from '../../contexts/BpmnStoreContext'
 import { useFfmpegBpmnStore } from '../../stores/ffmpegBpmnStore'
 import { bpmnService } from '../../services/bpmn'
-import { createDefaultBpmnXml } from '../../services/ffmpeg/defaultTemplate'
 import type { ProcessDefinition } from '../../types/bpmn'
 import './index.scss'
 
 type SaveStatus = 'saved' | 'unsaved' | 'saving'
 type TabMode = 'designer' | 'xml' | 'nodes' | 'execute'
-
-function createFfmpegProcess(name: string, description?: string): ProcessDefinition {
-  const id = `Process_${Date.now()}`
-  const now = Date.now()
-  return {
-    id,
-    name,
-    description,
-    bpmnXml: createDefaultBpmnXml(id, name),
-    createdAt: now,
-    updatedAt: now,
-    version: 1
-  }
-}
 
 const FfmpegBpmnPageContent: React.FC = () => {
   const designerRef = useRef<any>(null)
@@ -38,37 +23,31 @@ const FfmpegBpmnPageContent: React.FC = () => {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
   const {
     activeTab,
-    setActiveTab
-  } = useFfmpegBpmnStore()
-
-  const {
+    setActiveTab,
     bpmnXml,
     setBpmnXml,
     hasUnsavedChanges,
     currentProcessId,
     processList,
-    addProcess,
     updateProcess,
     setCurrentProcessId,
     clearHistory,
+    setSelectedElement,
     setHasUnsavedChanges
   } = useFfmpegBpmnStore()
-
-  useEffect(() => {
-    if (processList.length === 0) {
-      const defaultProcess = createFfmpegProcess('FFmpeg 工作流', '视频处理流水线')
-      addProcess(defaultProcess)
-      setCurrentProcessId(defaultProcess.id)
-      setBpmnXml(defaultProcess.bpmnXml)
-      clearHistory()
-      setHasUnsavedChanges(false)
-      setSaveStatus('saved')
-    }
-  }, [])
+  const hasCurrentWorkflow = Boolean(
+    currentProcessId && processList.some(process => process.id === currentProcessId)
+  )
 
   useEffect(() => {
     setSaveStatus(hasUnsavedChanges ? 'unsaved' : 'saved')
   }, [hasUnsavedChanges])
+
+  useEffect(() => {
+    if (!hasCurrentWorkflow) {
+      setSelectedElement(null)
+    }
+  }, [hasCurrentWorkflow, setSelectedElement])
 
   const handleSave = async () => {
     if (!currentProcessId) return
@@ -239,19 +218,31 @@ const FfmpegBpmnPageContent: React.FC = () => {
           </div>
 
           <div className="bpmn-page__tab-content">
-            <div
-              className="bpmn-page__designer-host"
-              style={{ display: activeTab === 'designer' ? 'block' : 'none', height: '100%' }}
-            >
-              <FfmpegDesigner ref={designerRef} />
-            </div>
-            {activeTab === 'xml' && <XmlEditor />}
-            {activeTab === 'nodes' && <NodeListEditor />}
-            {activeTab === 'execute' && <ExecutionPanel />}
+            {!hasCurrentWorkflow ? (
+              <div className="bpmn-page__empty-workflow">
+                <Icon name="document" size={48} className="bpmn-page__empty-workflow-icon" />
+                <div className="bpmn-page__empty-workflow-title">请先创建或导入工作流</div>
+                <div className="bpmn-page__empty-workflow-text">
+                  创建工作流后才能使用设计器画布、节点编辑和执行功能。
+                </div>
+              </div>
+            ) : (
+              <>
+                <div
+                  className="bpmn-page__designer-host"
+                  style={{ display: activeTab === 'designer' ? 'block' : 'none', height: '100%' }}
+                >
+                  <FfmpegDesigner ref={designerRef} />
+                </div>
+                {activeTab === 'xml' && <XmlEditor />}
+                {activeTab === 'nodes' && <NodeListEditor />}
+                {activeTab === 'execute' && <ExecutionPanel />}
+              </>
+            )}
           </div>
         </div>
 
-        {showPropertiesPanel && (
+        {hasCurrentWorkflow && showPropertiesPanel && (
           <div className="bpmn-page__sidebar bpmn-page__sidebar--right">
             <div className="bpmn-page__sidebar-header">
               <h3>FFmpeg 属性</h3>
@@ -267,7 +258,7 @@ const FfmpegBpmnPageContent: React.FC = () => {
           </div>
         )}
 
-        {!showPropertiesPanel && (
+        {hasCurrentWorkflow && !showPropertiesPanel && (
           <button
             className="bpmn-page__expand-btn bpmn-page__expand-btn--right"
             onClick={() => setShowPropertiesPanel(true)}
@@ -280,10 +271,12 @@ const FfmpegBpmnPageContent: React.FC = () => {
 
       <div className="bpmn-page__statusbar">
         <div className="bpmn-page__statusbar-left">
-          {currentProcessId && (
+          {hasCurrentWorkflow ? (
             <span className="bpmn-page__process-info">
               当前工作流: {processList.find(p => p.id === currentProcessId)?.name || '未命名'}
             </span>
+          ) : (
+            <span className="bpmn-page__process-info">未选择工作流</span>
           )}
         </div>
         <div className="bpmn-page__statusbar-right">

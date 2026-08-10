@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react'
 import FfmpegDesigner from './components/FfmpegDesigner'
 import FfmpegPropertiesPanel from './components/FfmpegPropertiesPanel'
+import FfmpegTimelinePanel from './components/FfmpegTimelinePanel'
 import ProcessList from '../bpmn/components/ProcessList'
 import Toolbar from '../bpmn/components/Toolbar'
 import XmlEditor from '../bpmn/components/XmlEditor'
@@ -230,9 +231,12 @@ const FfmpegBpmnPageContent: React.FC = () => {
               <>
                 <div
                   className="bpmn-page__designer-host"
-                  style={{ display: activeTab === 'designer' ? 'block' : 'none', height: '100%' }}
+                  style={{ display: activeTab === 'designer' ? 'flex' : 'none', height: '100%' }}
                 >
-                  <FfmpegDesigner ref={designerRef} />
+                  <div className="ffmpeg-bpmn__designer-stack">
+                    <FfmpegDesigner ref={designerRef} />
+                    <FfmpegTimelinePanel />
+                  </div>
                 </div>
                 {activeTab === 'xml' && <XmlEditor />}
                 {activeTab === 'nodes' && <NodeListEditor />}

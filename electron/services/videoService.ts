@@ -220,6 +220,7 @@ export const videoService = {
     screenshot(input: string, time: string, output: string) {
 
         const builder = new FFmpegCommandBuilder()
+            .overwrite()
             .input(input)
             .seekInput(time)
             .custom("-vframes", "1")
@@ -235,6 +236,7 @@ export const videoService = {
     screenshotAccurate(input: string, time: string, output: string) {
 
         const builder = new FFmpegCommandBuilder()
+            .overwrite()
             .input(input)
             .seekOutput(time)
             .custom("-vframes", "1")

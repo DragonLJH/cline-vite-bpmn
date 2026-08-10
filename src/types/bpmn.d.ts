@@ -204,8 +204,9 @@ export interface ValidationResult {
 
 // FFmpeg 工作流类型（统一 JSON 配置格式）
 export type {
+  FfmpegJobAction,
   FfmpegJobAction as FfmpegOperation,
-  FfmpegJobConfig as FfmpegTaskConfig,
+  FfmpegJobConfig,
   FfmpegJobInput,
   FfmpegJobOutput,
   FfmpegJobVideo,
@@ -219,6 +220,14 @@ export type {
   FfmpegJobCropAdvanced,
   FfmpegJobCropKeyframe
 } from '../services/ffmpeg/jobConfig'
+
+export interface FfmpegTaskConfig {
+  operation: import('../services/ffmpeg/jobConfig').FfmpegJobAction
+  inputVar?: string
+  outputVar?: string
+  params?: import('../services/ffmpeg/types').FfmpegParams
+  args?: string[]
+}
 
 export interface WorkflowTask {
   id: string

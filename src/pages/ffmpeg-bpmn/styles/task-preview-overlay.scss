@@ -1,0 +1,76 @@
+.ffmpeg-task-preview-overlay {
+  position: relative;
+  width: 84px;
+  height: 44px;
+  border-radius: 4px;
+  overflow: hidden;
+  pointer-events: none;
+  background: #eef2f7;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
+
+  &__img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  &__badge {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    font-size: 8px;
+    line-height: 1.2;
+    padding: 1px 3px;
+    background: rgba(15, 23, 42, 0.65);
+    color: #fff;
+    border-radius: 2px;
+    letter-spacing: 0.02em;
+  }
+
+  &--loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f1f5f9;
+  }
+
+  &__spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid #cbd5e1;
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: ffmpeg-task-preview-spin 0.8s linear infinite;
+  }
+
+  &--empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: #94a3b8;
+  }
+
+  &--error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fee2e2;
+    color: #dc2626;
+    font-size: 12px;
+    font-weight: 600;
+  }
+}
+
+@keyframes ffmpeg-task-preview-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.djs-overlays {
+  .ffmpeg-task-preview-overlay {
+    transform-origin: top left;
+  }
+}

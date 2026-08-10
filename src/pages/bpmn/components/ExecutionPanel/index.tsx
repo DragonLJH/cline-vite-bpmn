@@ -121,7 +121,8 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ className }) => {
     if (!path || !window.electronAPI?.ffmpeg) return false
 
     if (hasPreviewStore) {
-      useStore.getState().setEntryProbing?.(taskId, true)
+      const state = useStore.getState() as PreviewStoreSlice
+      state.setEntryProbing?.(taskId, true)
     } else {
       setLocalEntryInputs(prev => ({
         ...prev,
@@ -137,7 +138,7 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ className }) => {
           state.setEntryMediaInfo?.(taskId, result.info)
           state.setEntryInputError?.(taskId, null)
           if (entryTasks.length === 1) {
-            await state.refreshPreview?.(0)
+            void state.refreshPreview?.(0)
           }
         } else {
           setLocalEntryInputs(prev => ({
@@ -155,8 +156,9 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ className }) => {
 
       const message = result.error || '探测失败'
       if (hasPreviewStore) {
-        useStore.getState().setEntryMediaInfo?.(taskId, null)
-        useStore.getState().setEntryInputError?.(taskId, message)
+        const state = useStore.getState() as PreviewStoreSlice
+        state.setEntryMediaInfo?.(taskId, null)
+        state.setEntryInputError?.(taskId, message)
       } else {
         setLocalEntryInputs(prev => ({
           ...prev,
@@ -172,7 +174,8 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ className }) => {
     } catch (error) {
       const message = (error as Error).message
       if (hasPreviewStore) {
-        useStore.getState().setEntryInputError?.(taskId, message)
+        const state = useStore.getState() as PreviewStoreSlice
+        state.setEntryInputError?.(taskId, message)
       } else {
         setLocalEntryInputs(prev => ({
           ...prev,
@@ -186,7 +189,8 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ className }) => {
       return false
     } finally {
       if (hasPreviewStore) {
-        useStore.getState().setEntryProbing?.(taskId, false)
+        const state = useStore.getState() as PreviewStoreSlice
+        state.setEntryProbing?.(taskId, false)
       } else {
         setLocalEntryInputs(prev => ({
           ...prev,
@@ -304,7 +308,12 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ className }) => {
     try {
       let xmlToRun = bpmnXml
       const storeState = useStore.getState() as {
-        modelerRef?: { saveXML: (options: { format: boolean }) => Promise<{ xml?: string }> }
+        modelerRef?: {
+          saveXML: (options: { format: boolean }) => Promise<{ xml?: string }>
+          get: (name: string) => {
+            get: (id: string) => { businessObject?: unknown } | undefined
+          }
+        }
         setBpmnXml?: (xml: string) => void
         setBpmnXmlFromModeler?: (xml: string) => void
         getPendingFfmpegConfigs?: () => Record<string, FfmpegJobConfig>

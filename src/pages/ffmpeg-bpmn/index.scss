@@ -1,1 +1,13 @@
 @import '../bpmn/index.scss';
+
+.ffmpeg-bpmn__designer-stack {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+
+  .bpmn-designer {
+    flex: 1;
+    min-height: 0;
+  }
+}

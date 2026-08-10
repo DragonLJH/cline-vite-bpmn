@@ -59,3 +59,13 @@ export function formatSecondsToTime(
 export function formatSecondsToFfmpegTime(seconds: number): string {
   return formatSecondsToTime(seconds, { ms: true })
 }
+
+/** FFmpeg -ss _seek：短时长用十进制秒，避免 0:00.000 等在部分 build 上解析异常 */
+export function formatSecondsToFfmpegSeek(seconds: number): string {
+  const safe = Math.max(0, seconds)
+  if (safe < 3600) {
+    const rounded = Math.round(safe * 1000) / 1000
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')
+  }
+  return formatSecondsToFfmpegTime(safe)
+}

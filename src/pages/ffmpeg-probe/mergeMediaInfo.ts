@@ -5,10 +5,11 @@ export function mergeMediaInfo(
   next: Partial<FfmpegMediaInfo>
 ): FfmpegMediaInfo {
   const merged: FfmpegMediaInfo = { ...(prev || {}) }
+  const target = merged as Record<string, unknown>
 
   for (const [key, value] of Object.entries(next) as [keyof FfmpegMediaInfo, FfmpegMediaInfo[keyof FfmpegMediaInfo]][]) {
     if (value !== undefined && value !== null && value !== '') {
-      merged[key] = value
+      target[key] = value
     }
   }
 

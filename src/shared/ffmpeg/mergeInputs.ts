@@ -156,6 +156,28 @@ export function collectUpstreamServiceTasks(
   )
 }
 
+export function applyMergeBranchOrder(
+  upstreamTaskIds: string[],
+  branchOrder?: string[]
+): string[] {
+  if (!branchOrder?.length) return upstreamTaskIds
+
+  const upstreamSet = new Set(upstreamTaskIds)
+  const ordered = branchOrder.filter(taskId => upstreamSet.has(taskId))
+  const orderedSet = new Set(ordered)
+  const remaining = upstreamTaskIds.filter(taskId => !orderedSet.has(taskId))
+
+  return [...ordered, ...remaining]
+}
+
+export function collectOrderedUpstreamServiceTasks(
+  taskId: string,
+  graph: WorkflowGraph,
+  branchOrder?: string[]
+): string[] {
+  return applyMergeBranchOrder(collectUpstreamServiceTasks(taskId, graph), branchOrder)
+}
+
 /** 沿当前节点向上追溯，找到最近的上游 ServiceTask（同分支链路上的直接前驱） */
 export function findImmediateUpstreamServiceTask(
   taskId: string,

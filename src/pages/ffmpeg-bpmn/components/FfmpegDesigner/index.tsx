@@ -9,7 +9,9 @@ import customPalette from '../../../bpmn/modules/customPalette'
 import customContextPad from '../../../bpmn/modules/customContextPad'
 import customRules from '../../../bpmn/modules/customRules'
 import customReplaceMenu from '../../../bpmn/modules/customReplaceMenu'
+import taskPreviewOverlays from '../../modules/taskPreviewOverlays'
 import '../../../bpmn/components/BpmnDesigner/index.scss'
+import '../../styles/task-preview-overlay.scss'
 
 import 'bpmn-js/dist/assets/diagram-js.css'
 import 'bpmn-js/dist/assets/bpmn-js.css'
@@ -86,7 +88,8 @@ const FfmpegDesigner = React.forwardRef<FfmpegDesignerRef, FfmpegDesignerProps>(
         customPalette,
         customContextPad,
         customRules,
-        customReplaceMenu
+        customReplaceMenu,
+        taskPreviewOverlays
       ],
       moddleExtensions: {
         ffmpeg: ffmpegModdle

@@ -55,8 +55,10 @@ export {
 export type { CropSegment, KeyframeCropFilterResult } from './cropKeyframes'
 
 export {
+  applyMergeBranchOrder,
   canUseMergeAction,
   collectEntryInputTasks,
+  collectOrderedUpstreamServiceTasks,
   collectUpstreamServiceTasks,
   findImmediateUpstreamServiceTask,
   resolveBranchOutputPaths,

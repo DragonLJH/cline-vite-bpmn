@@ -2,7 +2,7 @@ import ReplaceMenuProvider from 'bpmn-js/lib/features/popup-menu/ReplaceMenuProv
 import { is } from 'bpmn-js/lib/util/ModelUtil'
 
 class FfmpegReplaceMenuProvider extends ReplaceMenuProvider {
-  getPopupMenuEntries(target: any) {
+  getPopupMenuEntries(target: any): any {
     if (!target || Array.isArray(target)) {
       return {}
     }
@@ -38,7 +38,7 @@ class FfmpegReplaceMenuProvider extends ReplaceMenuProvider {
     return {}
   }
 
-  getPopupMenuHeaderEntries(_target: any) {
+  getPopupMenuHeaderEntries(): any {
     return {}
   }
 }

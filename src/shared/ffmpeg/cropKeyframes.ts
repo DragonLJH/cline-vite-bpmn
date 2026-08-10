@@ -7,6 +7,11 @@ export function toEvenCrop(value: number): number {
   return n % 2 === 0 ? n : n - 1
 }
 
+export function toEvenCropOffset(value: number): number {
+  const n = Math.max(0, Math.floor(value))
+  return n % 2 === 0 ? n : Math.max(0, n - 1)
+}
+
 export function sortCropKeyframes(keyframes: FfmpegJobCropKeyframe[]): FfmpegJobCropKeyframe[] {
   return [...keyframes].sort((a, b) => a.time - b.time)
 }
@@ -96,8 +101,8 @@ export function buildKeyframeCropFilterComplex(
     const only = segments[0]
     const w = toEvenCrop(only.crop.width)
     const h = toEvenCrop(only.crop.height)
-    const x = toEvenCrop(only.crop.x)
-    const y = toEvenCrop(only.crop.y)
+    const x = toEvenCropOffset(only.crop.x)
+    const y = toEvenCropOffset(only.crop.y)
     return {
       filterComplex: `[0:v]crop=${w}:${h}:${x}:${y}[outv]`,
       mapVideo: '[outv]'
@@ -112,8 +117,8 @@ export function buildKeyframeCropFilterComplex(
   segments.forEach((segment, index) => {
     const w = toEvenCrop(segment.crop.width)
     const h = toEvenCrop(segment.crop.height)
-    const x = toEvenCrop(segment.crop.x)
-    const y = toEvenCrop(segment.crop.y)
+    const x = toEvenCropOffset(segment.crop.x)
+    const y = toEvenCropOffset(segment.crop.y)
     const vLabel = `[vc${index}]`
     const aLabel = `[ac${index}]`
 

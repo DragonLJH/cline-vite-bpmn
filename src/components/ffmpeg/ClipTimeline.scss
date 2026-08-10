@@ -1,0 +1,231 @@
+.ffmpeg-clip-timeline {
+  margin-bottom: 14px;
+
+  &--disabled {
+    opacity: 0.55;
+    pointer-events: none;
+  }
+
+  &--estimated {
+    .ffmpeg-clip-timeline__track {
+      border: 1px dashed #f59e0b;
+    }
+  }
+
+  &__header,
+  &__labels {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: #374151;
+    font-size: 12px;
+  }
+
+  &__header {
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+
+  &__status {
+    color: #6b7280;
+    font-weight: 500;
+  }
+
+  &__track {
+    position: relative;
+    height: 64px;
+    overflow: hidden;
+    border-radius: 8px;
+    background: #111827;
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  &__thumb-strip {
+    display: flex;
+    height: 100%;
+  }
+
+  &__thumb {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    border-right: 1px solid rgba(255, 255, 255, 0.18);
+    background: #1f2937;
+
+    &:last-child {
+      border-right: 0;
+    }
+
+    img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      user-select: none;
+    }
+
+    span {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #d1d5db;
+      font-size: 11px;
+    }
+  }
+
+  &__empty {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    color: #d1d5db;
+    font-size: 12px;
+  }
+
+  &__range {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border: 2px solid #2563eb;
+    background: rgba(37, 99, 235, 0.18);
+    box-shadow: 0 0 0 999px rgba(17, 24, 39, 0.42);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  &__handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 12px;
+    margin-left: -6px;
+    padding: 0;
+    border: 0;
+    border-radius: 3px;
+    background: #2563eb;
+    cursor: ew-resize;
+    z-index: 5;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 18px;
+      bottom: 18px;
+      left: 5px;
+      width: 2px;
+      background: rgba(255, 255, 255, 0.8);
+    }
+  }
+
+  &__playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 14px;
+    margin-left: -7px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: ew-resize;
+    z-index: 7;
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 4px;
+      width: 0;
+      height: 0;
+      border-right: 3px solid transparent;
+      border-left: 3px solid transparent;
+      border-top: 8px solid #f59e0b;
+    }
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 6px;
+      width: 2px;
+      background: #f59e0b;
+    }
+  }
+
+  &__marker {
+    position: absolute;
+    top: 8px;
+    width: 12px;
+    height: 12px;
+    margin-left: -6px;
+    padding: 0;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    background: #f59e0b;
+    cursor: pointer;
+    z-index: 6;
+
+    &--cut {
+      background: #ef4444;
+    }
+  }
+
+  &__segment {
+    position: absolute;
+    right: auto;
+    bottom: 6px;
+    height: 18px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    border-radius: 10px;
+    background: rgba(16, 185, 129, 0.72);
+    color: #fff;
+    font-size: 10px;
+    line-height: 16px;
+    text-align: center;
+    white-space: nowrap;
+    z-index: 4;
+
+    span {
+      display: block;
+      overflow: hidden;
+      padding: 0 10px;
+      text-overflow: ellipsis;
+    }
+  }
+
+  &__segment-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    padding: 0;
+    border: 0;
+    background: rgba(255, 255, 255, 0.55);
+    cursor: ew-resize;
+
+    &--start {
+      left: 0;
+    }
+
+    &--end {
+      right: 0;
+    }
+  }
+
+  &__note {
+    margin: 4px 0 0;
+    color: #b45309;
+    font-size: 11px;
+  }
+
+  &__labels {
+    margin-top: 6px;
+    color: #6b7280;
+    font-size: 11px;
+  }
+}

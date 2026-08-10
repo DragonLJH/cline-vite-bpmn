@@ -19,6 +19,7 @@ import {
 import { previewJobCommand } from '../../../../services/ffmpeg/jobCommandBuilder'
 import { DEFAULT_FFMPEG_CONCAT_COPY, DEFAULT_FFMPEG_XFADE_AUDIO, DEFAULT_FFMPEG_XFADE_VIDEO } from '../../../../shared/ffmpeg/jobConfig'
 import {
+  applyMergeBranchOrder,
   canUseMergeAction,
   collectEntryInputTasks,
   collectUpstreamServiceTasks
@@ -49,8 +50,6 @@ import { toLocalMediaUrl } from '../../../../services/ffmpeg/coordinateUtils'
 
 import Icon from '../../../../components/Icon'
 
-import TrimTimeline from '../../../../components/ffmpeg/TrimTimeline'
-import SeekTimeline from '../../../../components/ffmpeg/SeekTimeline'
 import CropCanvas from '../../../../components/ffmpeg/CropCanvas'
 
 import PreviewSourceBar from './preview/PreviewSourceBar'
@@ -121,7 +120,8 @@ const FfmpegPropertiesPanel: React.FC = () => {
     setActiveTab,
     bpmnXml,
     setActivePreviewTaskId,
-    getPreviewSourceForTask
+    getPreviewSourceForTask,
+    pendingFfmpegConfigs
   } = useFfmpegBpmnStore()
 
   const [elementName, setElementName] = useState('')
@@ -139,6 +139,7 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
   const loadedElementIdRef = useRef<string | null>(null)
   const prevSelectedElementRef = useRef<BpmnElement | null>(null)
+  const syncingPendingConfigRef = useRef(false)
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [pendingElement, setPendingElement] = useState<BpmnElement | null>(null)
   const [pendingDeselect, setPendingDeselect] = useState(false)
@@ -160,6 +161,10 @@ const FfmpegPropertiesPanel: React.FC = () => {
     () => (elementId && workflowGraph ? collectUpstreamServiceTasks(elementId, workflowGraph) : []),
     [elementId, workflowGraph]
   )
+  const orderedBranchIds = useMemo(
+    () => applyMergeBranchOrder(upstreamBranchIds, ffmpegConfig.concat?.branchOrder),
+    [upstreamBranchIds, ffmpegConfig.concat?.branchOrder]
+  )
   const entryTaskIds = useMemo(
     () => new Set((workflowGraph ? collectEntryInputTasks(workflowGraph) : []).map(task => task.id)),
     [workflowGraph]
@@ -171,6 +176,7 @@ const FfmpegPropertiesPanel: React.FC = () => {
     ? selectedElement.id
     : previewContext.activePreviewTaskId
   const activeEntryState = activeEntryTaskId ? previewContext.entryInputs[activeEntryTaskId] : null
+  const selectedPendingConfig = selectedElement?.id ? pendingFfmpegConfigs[selectedElement.id] : undefined
   const previewAvailable = ffmpegConfig.action !== 'concat'
     && ffmpegConfig.input?.source !== 'prev'
     && ffmpegConfig.input?.source !== 'merge'
@@ -302,6 +308,7 @@ const FfmpegPropertiesPanel: React.FC = () => {
     }
 
     setHasChanges(false)
+    lastSyncedPendingRef.current = null
 
   }, [])
 
@@ -371,11 +378,33 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
 
 
+  const lastSyncedPendingRef = useRef<FfmpegJobConfig | null>(null)
+
+  // 仅在外部（如时间轴面板）更新 pending 时拉取；勿把 ffmpegConfig 放入依赖，
+  // 否则本地输入写入 state 后、pending 尚未更新时，旧 pending 会把输入回滚。
+  useEffect(() => {
+    if (!isServiceTask || !selectedElement || !selectedPendingConfig) return
+    if (loadedElementIdRef.current !== selectedElement.id) return
+    if (selectedPendingConfig === lastSyncedPendingRef.current) return
+    lastSyncedPendingRef.current = selectedPendingConfig
+    syncingPendingConfigRef.current = true
+    setFfmpegConfig(selectedPendingConfig)
+    setHasChanges(true)
+  }, [isServiceTask, selectedElement, selectedPendingConfig])
+
+
+
   useEffect(() => {
 
     if (!isServiceTask || !selectedElement || !hasChanges) return
 
+    if (syncingPendingConfigRef.current) {
+      syncingPendingConfigRef.current = false
+      return
+    }
+
     useFfmpegBpmnStore.getState().setPendingFfmpegConfig(selectedElement.id, ffmpegConfig)
+    lastSyncedPendingRef.current = ffmpegConfig
 
   }, [ffmpegConfig, isServiceTask, selectedElement, hasChanges])
 
@@ -416,7 +445,10 @@ const FfmpegPropertiesPanel: React.FC = () => {
         delete next.crop
         delete next.cropAdvanced
         next.input = { source: 'merge' }
-        next.concat = { ...DEFAULT_FFMPEG_CONCAT_COPY }
+        next.concat = {
+          ...DEFAULT_FFMPEG_CONCAT_COPY,
+          branchOrder: upstreamBranchIds.length ? [...upstreamBranchIds] : undefined
+        }
         delete next.video
         delete next.audio
       }
@@ -504,6 +536,18 @@ const FfmpegPropertiesPanel: React.FC = () => {
       return next
     })
     setHasChanges(true)
+  }
+
+  const moveMergeBranch = (branchId: string, direction: -1 | 1) => {
+    const currentIndex = orderedBranchIds.indexOf(branchId)
+    const nextIndex = currentIndex + direction
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= orderedBranchIds.length) return
+
+    const nextOrder = [...orderedBranchIds]
+    const current = nextOrder[currentIndex]
+    nextOrder[currentIndex] = nextOrder[nextIndex]
+    nextOrder[nextIndex] = current
+    updateConcat({ branchOrder: nextOrder })
   }
 
 
@@ -733,8 +777,6 @@ const FfmpegPropertiesPanel: React.FC = () => {
     }
 
   }
-
-
 
   const handleSave = async (): Promise<boolean> => {
 
@@ -980,22 +1022,6 @@ const FfmpegPropertiesPanel: React.FC = () => {
 
           <>
 
-            <TrimTimeline
-
-              durationSeconds={mediaDuration}
-
-              start={String(ffmpegConfig.trim?.start ?? '0')}
-
-              duration={String(ffmpegConfig.trim?.duration ?? '10')}
-
-              onChange={patch => updateTrim(patch)}
-
-              onSeekPreview={previewAvailable && previewContext.mediaInfo ? handleSeekPreview : undefined}
-
-              durationEstimated={!previewContext.mediaInfo}
-
-            />
-
             {!previewContext.mediaInfo && previewAvailable && !previewContext.inputPath && (
 
               <p className="ffmpeg-props__hint">请先在执行面板选择视频，以获取真实时长并启用预览截帧。</p>
@@ -1164,22 +1190,6 @@ const FfmpegPropertiesPanel: React.FC = () => {
                 </button>
                 <span>{cropKeyframeTimes.length} 个关键帧</span>
               </div>
-            )}
-            {previewContext.inputPath && (
-              <SeekTimeline
-                durationSeconds={mediaDuration}
-                currentSeconds={previewTime}
-                onSeek={seconds => {
-                  if (previewAvailable) void refreshPreview(seconds)
-                }}
-                keyframeTimes={isKeyframeMode ? cropKeyframeTimes : undefined}
-                onKeyframeSelect={seconds => {
-                  if (previewAvailable) void refreshPreview(seconds)
-                }}
-                disabled={!previewContext.inputPath || !previewAvailable}
-                durationEstimated={!previewContext.mediaInfo}
-                loading={previewContext.previewLoading}
-              />
             )}
             {(cropPreviewImage || cropVideoSrc) && (
               <CropCanvas
@@ -1376,17 +1386,40 @@ const FfmpegPropertiesPanel: React.FC = () => {
                 <option value="xfade">交叉淡化 (重编码)</option>
               </select>
             </label>
-            {upstreamBranchIds.length > 0 && (
+            {orderedBranchIds.length > 0 && (
               <div className="ffmpeg-props__field">
-                <span>上游分支（自动识别）</span>
+                <span>合并顺序</span>
                 <ul className="ffmpeg-props__branch-list">
-                  {upstreamBranchIds.map(branchId => {
+                  {orderedBranchIds.map((branchId, index) => {
                     const branchTask = workflowGraph?.tasks.find(task => task.id === branchId)
                     return (
-                      <li key={branchId}>{branchTask?.name || branchId}</li>
+                      <li key={branchId}>
+                        <span className="ffmpeg-props__branch-name">
+                          {index + 1}. {branchTask?.name || branchId}
+                        </span>
+                        <span className="ffmpeg-props__branch-actions">
+                          <button
+                            type="button"
+                            onClick={() => moveMergeBranch(branchId, -1)}
+                            disabled={index === 0}
+                          >
+                            上移
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveMergeBranch(branchId, 1)}
+                            disabled={index === orderedBranchIds.length - 1}
+                          >
+                            下移
+                          </button>
+                        </span>
+                      </li>
                     )
                   })}
                 </ul>
+                <p className="ffmpeg-props__hint">
+                  执行合并时会按此顺序依次拼接视频。
+                </p>
               </div>
             )}
             {ffmpegConfig.concat?.mode === 'xfade' && (

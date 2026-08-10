@@ -9,7 +9,7 @@ const ALLOWED_CREATE_ENTRIES = new Set([
 ])
 
 class FfmpegPaletteProvider extends PaletteProvider {
-  getPaletteEntries() {
+  getPaletteEntries(): any {
     const entries = super.getPaletteEntries() as Record<string, unknown>
     const filtered: Record<string, unknown> = {}
 

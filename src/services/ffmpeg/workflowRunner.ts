@@ -13,7 +13,7 @@ import { previewJobCommand } from './jobCommandBuilder'
 import type { BuildJobCommandOptions } from '../../shared/ffmpeg/jobCommandBuilder'
 import {
   collectEntryInputTasks,
-  collectUpstreamServiceTasks,
+  collectOrderedUpstreamServiceTasks,
   resolveBranchOutputPaths,
   resolveImmediateUpstreamOutput,
   validateCopyMergeCompatibility
@@ -101,6 +101,13 @@ function normalizeEntryPayload(value: string | WorkflowEntryPayload): WorkflowEn
   return value
 }
 
+function isWorkflowEntryPayload(value: WorkflowEntryInputsArg): value is WorkflowEntryPayload {
+  return typeof value === 'object'
+    && value !== null
+    && 'path' in value
+    && typeof value.path === 'string'
+}
+
 function injectEntryIntoContext(
   context: Record<string, unknown>,
   taskId: string,
@@ -127,7 +134,7 @@ function initializeWorkflowContext(
     return context
   }
 
-  if ('path' in entryInputs) {
+  if (isWorkflowEntryPayload(entryInputs)) {
     const payload = normalizeEntryPayload(entryInputs)
     if (entryTasks.length === 1) {
       injectEntryIntoContext(context, entryTasks[0].id, payload)
@@ -262,7 +269,7 @@ export async function runWorkflow(
   const steps: WorkflowStepResult[] = []
   const fallbackInput = typeof entryInputs === 'string'
     ? entryInputs
-    : ('path' in entryInputs
+    : (isWorkflowEntryPayload(entryInputs)
       ? entryInputs.path
       : (Object.values(entryInputs)[0]?.path || ''))
 
@@ -291,7 +298,7 @@ export async function runWorkflow(
       assertJoinBarrierReady(graph, stepId, context)
 
       if (config.action === 'concat') {
-        const upstreamTaskIds = collectUpstreamServiceTasks(stepId, graph)
+        const upstreamTaskIds = collectOrderedUpstreamServiceTasks(stepId, graph, config.concat?.branchOrder)
         const branchPaths = resolveBranchOutputPaths(upstreamTaskIds, graph, context)
         const concatMode = config.concat?.mode || 'copy'
 

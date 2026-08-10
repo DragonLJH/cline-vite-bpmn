@@ -36,10 +36,20 @@ export function parseArgsToTranscodeParams(args: string[]): FfmpegTranscodeParam
     const paramKey = TRANSCODE_FLAG_MAP[flag]
     if (paramKey && i + 1 < args.length) {
       const value = args[i + 1]
-      if (paramKey === 'crf' || paramKey === 'fps') {
-        params[paramKey] = Number(value)
-      } else {
-        params[paramKey] = value
+      switch (paramKey) {
+        case 'crf':
+        case 'fps':
+          params[paramKey] = Number(value)
+          break
+        case 'videoCodec':
+        case 'audioCodec':
+        case 'videoBitrate':
+        case 'audioBitrate':
+        case 'preset':
+          params[paramKey] = value
+          break
+        default:
+          params.extraArgs!.push(flag, value)
       }
       i += 2
       continue

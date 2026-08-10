@@ -92,6 +92,7 @@ export interface FfmpegJobCropAdvanced {
 
 export interface FfmpegJobConcat {
   mode: 'copy' | 'xfade'
+  branchOrder?: string[]
   transition?: string
   duration?: number
   fps?: number

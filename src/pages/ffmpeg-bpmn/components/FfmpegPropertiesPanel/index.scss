@@ -135,6 +135,54 @@
     color: #9ca3af;
   }
 
+  &__branch-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+
+    li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      background: #f9fafb;
+    }
+  }
+
+  &__branch-name {
+    min-width: 0;
+    color: #374151;
+    font-size: 12px;
+    word-break: break-all;
+  }
+
+  &__branch-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 4px;
+
+    button {
+      padding: 3px 6px;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+      background: #fff;
+      color: #374151;
+      font-size: 11px;
+      cursor: pointer;
+
+      &:disabled {
+        color: #9ca3af;
+        cursor: not-allowed;
+      }
+    }
+  }
+
   &__json {
     font-size: 11px;
     max-height: 180px;

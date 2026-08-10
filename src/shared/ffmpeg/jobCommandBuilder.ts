@@ -6,6 +6,7 @@ import {
   getCropDurationHint,
   isKeyframeCropMode,
   toEvenCrop,
+  toEvenCropOffset,
   type KeyframeCropFilterResult
 } from './cropKeyframes'
 import { DEFAULT_VIDEO_CODEC, resolveVideoCodec, supportsX264Preset } from './codecResolver'
@@ -202,7 +203,9 @@ function appendVideoAudioArgs(args: string[], config: FfmpegJobConfig) {
   }
   if (config.video?.crf != null) args.push('-crf', String(config.video.crf))
 
-  if (config.audio?.codec) {
+  if (config.audio?.codec === 'none') {
+    args.push('-an')
+  } else if (config.audio?.codec) {
     args.push('-c:a', config.audio.codec)
   } else if (hasFilters || config.action === 'watermark' || config.action === 'crop') {
     args.push('-c:a', 'copy')
@@ -214,6 +217,10 @@ function toEven(value: number): number {
   return toEvenCrop(value)
 }
 
+function toEvenOffset(value: number): number {
+  return toEvenCropOffset(value)
+}
+
 function appendCropOutputArgs(
   args: string[],
   config: FfmpegJobConfig,
@@ -221,7 +228,11 @@ function appendCropOutputArgs(
 ) {
   args.push('-filter_complex', filterResult.filterComplex)
   args.push('-map', filterResult.mapVideo)
-  if (filterResult.mapAudio) args.push('-map', filterResult.mapAudio)
+  if (filterResult.mapAudio) {
+    args.push('-map', filterResult.mapAudio)
+  } else if (config.audio?.codec !== 'none') {
+    args.push('-map', '0:a?')
+  }
   appendVideoAudioArgs(args, config)
   if (!resolveVideoCodec(config.video?.codec)) {
     args.push('-c:v', DEFAULT_VIDEO_CODEC)
@@ -330,8 +341,7 @@ export function buildJobCommand(
           duration,
           fallbackCrop
         )
-        const includeAudio = config.audio?.codec !== 'none'
-        const filterResult = buildKeyframeCropFilterComplex(segments, { includeAudio })
+        const filterResult = buildKeyframeCropFilterComplex(segments, { includeAudio: false })
         if (filterResult && segments.length > 1) {
           appendCropOutputArgs(args, config, filterResult)
           if (outputPath) args.push(outputPath)
@@ -341,8 +351,8 @@ export function buildJobCommand(
           const only = segments[0].crop
           const w = toEven(only.width)
           const h = toEven(only.height)
-          const x = toEven(only.x)
-          const y = toEven(only.y)
+          const x = toEvenOffset(only.x)
+          const y = toEvenOffset(only.y)
           args.push('-vf', `crop=${w}:${h}:${x}:${y}`)
           appendVideoAudioArgs(args, config)
           if (!resolveVideoCodec(config.video?.codec)) {
@@ -356,8 +366,8 @@ export function buildJobCommand(
       const crop = fallbackCrop
       const w = toEven(crop.width)
       const h = toEven(crop.height)
-      const x = toEven(crop.x)
-      const y = toEven(crop.y)
+      const x = toEvenOffset(crop.x)
+      const y = toEvenOffset(crop.y)
       args.push('-vf', `crop=${w}:${h}:${x}:${y}`)
       appendVideoAudioArgs(args, config)
       if (!resolveVideoCodec(config.video?.codec)) {
